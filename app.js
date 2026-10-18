@@ -393,7 +393,10 @@
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + (d.assessment.template.label || d.assessment.template.id) }));
     var msg = h('p', { class: 'err', id: 'drawermsg' });
-    function act(label, action, enabled) { return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { api('POST', '/ui/api/booking/' + b.id + '/action', { action: action }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.textContent = x.message; }); } }); }
+    function run(action) { return api('POST', '/ui/api/booking/' + b.id + '/action', { action: action }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; }); }
+    function act(label, action, enabled) {
+      return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
+    }
     if (isFac) {
       var done = b.status === 'completed'; var sched = b.status === 'confirmed';
       box.appendChild(h('div', { class: 'actions' },
@@ -426,6 +429,17 @@
         h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', text: 'Close', onclick: function () { dlg.close(); } })));
       document.body.appendChild(dlg); dlg.addEventListener('close', function () { dlg.remove(); }); dlg.showModal();
     }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+  }
+  // Warning before the assessment details go to the advisor: it names the company and the advisor, and says nothing reaches the other company.
+  function confirmAdvisor(b, d, go) {
+    var other = b.company === 'RGOS' ? 'RGAB' : 'RGOS';
+    var dlg = h('dialog', { id: 'advisor-dialog' }, h('h3', { text: 'Send to the ' + b.company + ' advisor for confirmation?' }),
+      h('div', { class: 'brandbox brand-' + b.company }, h('div', { class: 'brandhead' }, companyBadge(b.company), ' ' + (d.advisor_name || 'the advisor of this interview')),
+        h('ul', null, h('li', { text: 'The advisor sees the interview and assessment details inside the ' + b.company + ' system only.' }), h('li', { text: 'Nothing is sent to ' + other + ', its advisors or its clients.' }),
+          h('li', { text: 'The advisor confirms or reports an error there; the answer comes back here. Then you can release the result.' }))),
+      h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'advisor-confirm', type: 'button', text: 'Yes, send to the ' + b.company + ' advisor', onclick: function () { dlg.close(); go(); } }),
+        h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
+    document.body.appendChild(dlg); dlg.addEventListener('close', function () { dlg.remove(); }); dlg.showModal();
   }
   function confirmRelease(b, msg) {
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
