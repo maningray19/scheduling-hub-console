@@ -391,7 +391,7 @@
       ['Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : '-'], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
       ['Company branding', d.branding || '-']];
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
-    if (d.assessment) box.appendChild(h('p', { class: 'mark', text: 'Template: ' + d.assessment.template.id + ' - ' + d.assessment.template.label }));
+    if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + (d.assessment.template.label || d.assessment.template.id) }));
     var msg = h('p', { class: 'err', id: 'drawermsg' });
     function act(label, action, enabled) { return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { api('POST', '/ui/api/booking/' + b.id + '/action', { action: action }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.textContent = x.message; }); } }); }
     if (isFac) {
@@ -415,7 +415,7 @@
         h('dt', { text: 'From' }), h('dd', { text: p.from }), h('dt', { text: 'To' }), h('dd', { text: p.to }),
         h('dt', { text: 'Client' }), h('dd', { text: p.client_name }), h('dt', { text: 'Job position' }), h('dd', { text: p.job_position }),
         h('dt', { text: 'Advisor' }), h('dd', { text: p.advisor_name || '-' }),
-        h('dt', { text: 'Template' }), h('dd', { text: p.template.id + ' - ' + p.template.label })),
+        h('dt', { text: 'Template' }), h('dd', { text: p.template.label || p.template.id })),
       h('ul', null, p.sections.map(function (x) { return h('li', { text: x }); })),
       h('p', { class: 'note', text: p.branding.signature + ' | ' + p.delivery }),
       p.template.brand_matches_company ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
