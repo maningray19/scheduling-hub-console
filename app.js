@@ -391,7 +391,7 @@
       ['Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : '-'], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
       ['Company branding', d.branding || '-']];
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
-    if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + (d.assessment.template.label || d.assessment.template.id) }));
+    if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
     var msg = h('p', { class: 'err', id: 'drawermsg' });
     function run(action) { return api('POST', '/ui/api/booking/' + b.id + '/action', { action: action }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; }); }
     function act(label, action, enabled) {
@@ -411,17 +411,22 @@
     box.appendChild(h('ul', { class: 'timeline' }, (b.events || []).map(function (e) { return h('li', { text: localDate(e.at) + ' ' + localTime(e.at) + ' - ' + e.event.replace(/_/g, ' ') }); })));
     return box;
   }
+  // Tolerant of what each company's system returns: missing fields show a dash; "brand_matches_company" blocks only when a company says false.
+  function brandOk(p) { return !p.template || p.template.brand_matches_company !== false; }
   function previewBlock(p) {
+    var tpl = p.template || {}; var br = p.branding || {}; var secs = Array.isArray(p.sections) ? p.sections : [];
+    var empty = !secs.length && !tpl.label && !tpl.id;
     return h('div', { class: 'brandbox brand-' + p.company },
-      h('div', { class: 'brandhead' }, h('strong', { text: p.branding.name }), h('span', { text: ' ' + p.branding.letterhead })),
+      h('div', { class: 'brandhead' }, h('strong', { text: br.name || p.company }), br.letterhead && br.letterhead !== br.name ? h('span', { text: ' ' + br.letterhead }) : null),
       h('dl', { class: 'kv' },
-        h('dt', { text: 'From' }), h('dd', { text: p.from }), h('dt', { text: 'To' }), h('dd', { text: p.to }),
-        h('dt', { text: 'Client' }), h('dd', { text: p.client_name }), h('dt', { text: 'Job position' }), h('dd', { text: p.job_position }),
+        h('dt', { text: 'From' }), h('dd', { text: p.from || '-' }), h('dt', { text: 'To' }), h('dd', { text: p.to || '-' }),
+        h('dt', { text: 'Client' }), h('dd', { text: p.client_name || '-' }), h('dt', { text: 'Job position' }), h('dd', { text: p.job_position || '-' }),
         h('dt', { text: 'Advisor' }), h('dd', { text: p.advisor_name || '-' }),
-        h('dt', { text: 'Template' }), h('dd', { text: p.template.label || p.template.id })),
-      h('ul', null, p.sections.map(function (x) { return h('li', { text: x }); })),
-      h('p', { class: 'note', text: p.branding.signature + ' | ' + p.delivery }),
-      p.template.brand_matches_company ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
+        h('dt', { text: 'Template' }), h('dd', { text: tpl.label || tpl.id || '-' })),
+      secs.length ? h('ul', null, secs.map(function (x) { return h('li', { text: x }); })) : null,
+      empty ? h('p', { class: 'note', text: 'No assessment result is recorded for this interview yet, so there is nothing to show. The company system fills this in once the result exists.' }) : null,
+      h('p', { class: 'note', text: [br.signature, p.delivery].filter(Boolean).join(' | ') }),
+      brandOk(p) ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
   }
   function showPreview(b, msg) {
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
@@ -445,7 +450,7 @@
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
       var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p),
         h('p', { text: 'It is sent once, only through ' + p.company + ', with ' + p.company + ' branding. Recipient, template and branding are validated by that company first.' }),
-        h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !p.template.brand_matches_company, text: 'Yes, release', onclick: function () {
+        h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p), text: 'Yes, release', onclick: function () {
           dlg.close(); api('POST', '/ui/api/booking/' + b.id + '/release', {}).then(function (r) { msg.className = 'ok'; msg.textContent = 'Sent as ' + r.branding + ' to ' + r.sent_to + ' (' + (r.delivery || '') + ')'; return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
         } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
       document.body.appendChild(dlg); dlg.addEventListener('close', function () { dlg.remove(); }); dlg.showModal();
