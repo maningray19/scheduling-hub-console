@@ -69,23 +69,56 @@
   var ASSESS = { none: 'Not started', draft: 'Draft', submitted: 'Submitted', awaiting_advisor: 'Awaiting advisor', approved: 'Approved', released: 'Released' };
 
   // ------------------------------------------------------------ data
-  function rangeFor() {
-    var d = state.date;
-    if (state.view === 'day') return [d, addDays(d, 1)];
-    if (state.view === 'week') { var s = addDays(d, -((dow(d) + 6) % 7)); return [s, addDays(s, 7)]; }
+  // Smooth clicks: every menu click first redraws at once from what is already known (the company filter and the menus work on the loaded list, never on the network),
+  // then fresh data is fetched quietly and the screen is redrawn when it arrives. Calendar ranges are cached (a bigger cached range also serves a smaller one) and the next/previous range is fetched ahead.
+  var calCache = []; var resCache = {};
+  function rangeFor(d, view) {
+    d = d || state.date; view = view || state.view;
+    if (view === 'day') return [d, addDays(d, 1)];
+    if (view === 'week') { var s = addDays(d, -((dow(d) + 6) % 7)); return [s, addDays(s, 7)]; }
     var first = d.slice(0, 8) + '01'; var s2 = addDays(first, -((dow(first) + 6) % 7)); return [s2, addDays(s2, 42)];
   }
+  function calLookup(r) {
+    var f = Date.parse(isoStart(r[0])), t = Date.parse(isoStart(r[1])), best = null;
+    calCache.forEach(function (e) { if (e.from <= f && e.to >= t && (!best || e.at > best.at)) best = e; });
+    if (!best) return null;
+    return { items: best.items.filter(function (i) { var s = Date.parse(i.start); return s >= f && s < t; }), exact: best.from === f && best.to === t, at: best.at };
+  }
+  function calFetch(r) {
+    var f = Date.parse(isoStart(r[0])), t = Date.parse(isoStart(r[1]));
+    return api('GET', '/ui/api/calendar?from=' + encodeURIComponent(isoStart(r[0])) + '&to=' + encodeURIComponent(isoStart(r[1]))).then(function (j) {
+      calCache = calCache.filter(function (e) { return !(e.from === f && e.to === t); }); calCache.push({ from: f, to: t, items: j.items, at: Date.now() });
+      if (calCache.length > 12) calCache.shift();
+      return j.items;
+    });
+  }
   function loadCalendar() {
-    var r = rangeFor();
     if (state.tab !== 'calendar') return Promise.resolve();
-    return api('GET', '/ui/api/calendar?from=' + encodeURIComponent(isoStart(r[0])) + '&to=' + encodeURIComponent(isoStart(r[1])) + (state.company ? '&company=' + state.company : ''))
-      .then(function (j) { state.items = j.items; state.error = null; })
-      .catch(function (e) { state.error = e.message; });
+    var r = rangeFor(); var key = isoStart(r[0]) + '|' + isoStart(r[1]); var hit = calLookup(r);
+    if (hit && hit.exact && Date.now() - hit.at < 20000) return Promise.resolve();       // fresh enough: nothing to fetch
+    return calFetch(r).then(function () {
+      var now = rangeFor(); if (isoStart(now[0]) + '|' + isoStart(now[1]) === key && state.tab === 'calendar') { state.items = (calLookup(r) || { items: [] }).items; state.error = null; state.calLoading = false; }
+      setTimeout(prefetchCalendar, 400);
+    }).catch(function (e) { state.error = e.message; state.calLoading = false; });
+  }
+  function prefetchCalendar() {
+    if (state.tab !== 'calendar' || !state.user) return;
+    var step = state.view === 'day' ? 1 : state.view === 'week' ? 7 : 30;
+    [step, -step].forEach(function (n) {
+      var d = state.view === 'month' ? shiftMonth(n > 0 ? 1 : -1) : addDays(state.date, n); var r = rangeFor(d, state.view);
+      if (!calLookup(r)) calFetch(r).catch(function () {});
+    });
   }
   function loadWide() {
     var from = addDays(todayDubai(), -30), to = addDays(todayDubai(), 62);
-    return api('GET', '/ui/api/calendar?from=' + encodeURIComponent(isoStart(from)) + '&to=' + encodeURIComponent(isoStart(to)) + (state.company ? '&company=' + state.company : ''))
+    return api('GET', '/ui/api/calendar?from=' + encodeURIComponent(isoStart(from)) + '&to=' + encodeURIComponent(isoStart(to)))
       .then(function (j) { state.wide = j.items; state.error = null; }).catch(function (e) { state.error = e.message; });
+  }
+  function resKey() { var rr = resRange(); return '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); }
+  // what can be shown immediately for the current tab (called right after a click, before any network)
+  function prime() {
+    if (state.tab === 'calendar') { var hit = calLookup(rangeFor()); state.items = hit ? hit.items : []; state.calLoading = !hit; }
+    if (state.tab === 'results') state.tabData.results = resCache[resKey()] || null;
   }
   function loadControls() { return api('GET', '/ui/api/controls').then(function (c) { state.controls = c; }).catch(function () {}); }
 
@@ -98,7 +131,7 @@
       phase(it) === 'ongoing' ? chip('Ongoing now', 'warn') : null,
       it.rescheduled ? chip('Rescheduled', 'warn') : null,
       d.documents ? chip('Docs: ' + (d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'complete' : 'incomplete'), d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'ok' : 'warn') : null,
-      chip('Assessment: ' + (ASSESS[it.assessment_status] || it.assessment_status), it.assessment_status === 'released' ? 'ok' : ''),
+      it.pre_launch ? chip('Handled in ' + it.company + ' portal (history)', '') : chip('Assessment: ' + (ASSESS[it.assessment_status] || it.assessment_status), it.assessment_status === 'released' ? 'ok' : ''),
       d.advisor_confirmation ? chip('Advisor: ' + d.advisor_confirmation.replace('_', ' '), d.advisor_confirmation === 'confirmed' ? 'ok' : (d.advisor_confirmation === 'pending' ? 'warn' : '')) : null,
       d.verification_status ? chip('Verification: ' + d.verification_status, d.verification_status === 'verified' ? 'ok' : '') : null,
       d.result_release ? chip('Release: ' + d.result_release.replace('_', ' '), d.result_release === 'released' ? 'ok' : (d.result_release === 'ready' ? 'warn' : '')) : null);
@@ -112,6 +145,7 @@
   var ASSESS_MENU = [['', 'Any assessment'], ['none', 'Not started'], ['draft', 'Draft'], ['submitted', 'Submitted'], ['awaiting_advisor', 'Awaiting advisor'], ['approved', 'Approved'], ['released', 'Released']];
   function phase(it) { var now = Date.now(); return it.status === 'confirmed' ? (Date.parse(it.start) <= now && now < Date.parse(it.end) ? 'ongoing' : (Date.parse(it.start) > now ? 'upcoming' : 'overdue')) : it.status; }
   function matches(it) {
+    if (state.company && it.company !== state.company) return false;
     if (state.status) { var ph = phase(it); if (state.status === 'rescheduled' ? !it.rescheduled : state.status === 'attended' ? it.status !== 'completed' : state.status === 'upcoming' ? ph !== 'upcoming' : state.status === 'ongoing' ? ph !== 'ongoing' : it.status !== state.status) return false; }
     if (state.assess && it.assessment_status !== state.assess) return false;
     if (!state.search) return true;
@@ -173,12 +207,12 @@
       h('input', { type: 'date', value: state.date, 'aria-label': 'Go to date', onchange: function (e) { if (e.target.value) { state.date = e.target.value; refresh(); } } }),
       companyFilter(), statusMenu(), searchBox());
     var body = state.view === 'day' ? dayView(state.items, state.date, breakMarks(state.date)) : state.view === 'week' ? weekView(state.items) : monthView(state.items);
-    return h('div', null, statsStrip(), bar, state.error ? h('p', { class: 'err', text: state.error }) : null, body);
+    return h('div', null, statsStrip(), bar, state.error ? h('p', { class: 'err', text: state.error }) : null, state.calLoading ? h('p', { class: 'note', text: 'Loading interviews...' }) : null, body);
   }
   function statsStrip() {
     var items = (state.items || []).filter(function (i) { return i.status !== 'cancelled'; });
     var by = function (c) { return items.filter(function (i) { return i.company === c; }).length; };
-    var attention = items.filter(function (i) { return i.status === 'completed' && ['none', 'draft', 'submitted'].indexOf(i.assessment_status) >= 0 || i.assessment_status === 'awaiting_advisor' || (i.assessment_status === 'approved' && i.status === 'completed'); }).length;
+    var attention = items.filter(function (i) { if (i.pre_launch) return false;  return i.status === 'completed' && ['none', 'draft', 'submitted'].indexOf(i.assessment_status) >= 0 || i.assessment_status === 'awaiting_advisor' || (i.assessment_status === 'approved' && i.status === 'completed'); }).length;
     var scope = state.view === 'day' ? 'this day' : state.view === 'week' ? 'this week' : 'this month';
     function tile(cls, num, lbl, company, tip) { return h('button', { class: 'stat ' + cls, type: 'button', 'aria-pressed': String(state.company === company && cls !== 's-ATT'), title: tip,
       onclick: function () { if (cls === 's-ATT') { state.tab = 'queues'; refresh(); return; } state.company = company; refresh(); } }, h('span', { class: 'num', text: String(num) }), h('span', { class: 'lbl', text: lbl })); }
@@ -243,7 +277,7 @@
     t.appendChild(tb); return h('div', { class: 'scroll-x' }, t);
   }
   function queuesTab() {
-    var all = (state.wide || []).filter(matches); var now = Date.now();
+    var all = (state.wide || []).filter(matches).filter(function (i) { return !i.pre_launch; }); var now = Date.now();
     var sec = function (title, rows, empty) { return h('div', { class: 'card' }, h('h2', { text: title + ' (' + rows.length + ')' }), queueTable(rows, empty)); };
     var upcoming = all.filter(function (i) { return i.status === 'confirmed' && Date.parse(i.end) >= now; });
     var needResult = all.filter(function (i) { return i.status === 'completed' && ['none', 'draft', 'submitted'].indexOf(i.assessment_status) >= 0; });
@@ -503,7 +537,9 @@
     function act(label, action, enabled) {
       return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
     }
-    if (isFac) {
+    if (b.pre_launch) {
+      box.appendChild(h('p', { class: 'note history-note', text: 'Handled in the ' + b.company + ' portal, before the Command Center. Grades, the Counselor confirmation and the result e-mail for this interview stay in ' + b.company + '. Shown here as history only; nothing can be sent from here.' }));
+    } else if (isFac) {
       var done = b.status === 'completed'; var sched = b.status === 'confirmed';
       box.appendChild(h('div', { class: 'actions' },
         act('Mark interview completed', 'complete_interview', sched), act('Mark no-show', 'mark_no_show', sched),
@@ -511,7 +547,7 @@
         act('Send to advisor for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
         h('button', { class: 'btn', type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), onclick: function () { confirmRelease(b, msg); } })));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
-    box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
+    if (!b.pre_launch) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
     box.appendChild(msg);
     box.appendChild(h('h3', { text: 'History' }));
     box.appendChild(h('ul', { class: 'timeline' }, (b.events || []).map(function (e) { return h('li', { text: localDate(e.at) + ' ' + localTime(e.at) + ' - ' + e.event.replace(/_/g, ' ') }); })));
@@ -520,6 +556,15 @@
   // Tolerant of what each company's system returns: missing fields show a dash; "brand_matches_company" blocks only when a company says false.
   function brandOk(p) { return !p.template || p.template.brand_matches_company !== false; }
   function previewBlock(p) {
+    if (typeof p.html === 'string' && p.html) {   // the company's real design, in a sandboxed frame (nothing in it can run, open or load from outside)
+      var fr = h('iframe', { class: 'previewframe', src: 'preview-frame.html', sandbox: 'allow-scripts', title: 'The result e-mail as it will be sent' });
+      fr.addEventListener('load', function () { try { fr.contentWindow.postMessage({ html: p.html }, '*'); } catch (e) { /* frame gone */ } });
+      window.addEventListener('message', function (ev) { if (ev.source === fr.contentWindow && ev.data && typeof ev.data.h === 'number') fr.style.height = Math.min(Math.max(ev.data.h + 8, 160), 1600) + 'px'; });
+      return h('div', { class: 'brandbox brand-' + p.company },
+        h('dl', { class: 'kv' }, h('dt', { text: 'From' }), h('dd', { text: p.from || '-' }), h('dt', { text: 'To' }), h('dd', { text: p.to || '-' }), h('dt', { text: 'Subject' }), h('dd', { text: p.subject || '-' })),
+        fr, h('p', { class: 'note', text: [(p.branding || {}).signature, p.delivery].filter(Boolean).join(' | ') }),
+        brandOk(p) ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
+    }
     var tpl = p.template || {}; var br = p.branding || {}; var secs = Array.isArray(p.sections) ? p.sections : [];
     var empty = !secs.length && !tpl.label && !tpl.id;
     return h('div', { class: 'brandbox brand-' + p.company },
@@ -611,7 +656,7 @@
       h('header', { class: 'topbar' }, h('h1', { text: 'Facilitator Command Center' }), h('span', { class: 'badge', text: u.display_name + ' - ' + u.role }),
         h('button', { class: 'btn secondary' + (tourSeen() ? '' : ' hint'), type: 'button', id: 'tour-btn', text: 'Tour', title: 'A two-minute guided tour', onclick: function () { if (window.PICTour) window.PICTour.start(); } }),
         h('button', { class: 'btn secondary', type: 'button', id: 'logout', text: 'Sign out', onclick: function () { api('POST', '/ui/api/logout', {}).finally(function () { state.user = null; render(); }); } })),
-      h('nav', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) { return h('button', { role: 'tab', type: 'button', 'aria-selected': String(state.tab === t[0]), 'data-tab': t[0], text: t[1], onclick: function () { state.tab = t[0]; refresh(); } }); })),
+      h('nav', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) { return h('button', { role: 'tab', type: 'button', 'aria-selected': String(state.tab === t[0]), 'data-tab': t[0], text: t[1], onclick: function () { state.tab = t[0]; state.fx = true; refresh(); } }); })),
       h('main', { id: 'main' }));
   }
   function renderMain() {
@@ -632,7 +677,7 @@
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
     if (t === 'calendar') { jobs.push(loadCalendar()); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
-    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
+    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (rq === resKey()) state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
@@ -644,7 +689,11 @@
     return Promise.all(jobs).then(renderMain);
   }
   function refreshAll() { return loadControls().then(function () { return refreshTab(); }).then(function () { var shell = document.querySelector('.banner'); if (state.user) { var scroll = window.scrollY; root.textContent = ''; root.appendChild(mainShell()); renderMain(); window.scrollTo(0, scroll); } }); }
-  function refresh() { state.fx = true; return refreshAll(); }
+  function refresh() {
+    prime();
+    try { renderMain(); } catch (e) { var m = document.getElementById('main'); if (m) { m.textContent = ''; m.appendChild(h('p', { class: 'note', text: 'Loading...' })); } }   // this tab's data is not loaded yet: it is drawn when it arrives
+    return refreshTab();
+  }
   function init() {
     return api('GET', '/ui/api/me').then(function (m) { state.user = m.user; return loadControls(); }).then(function () { render(); return refreshTab(); }).catch(function (e) { if (e && e.status !== 401) console.error('init failed', e && e.stack || e); state.user = null; render(); });
   }
