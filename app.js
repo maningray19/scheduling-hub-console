@@ -607,7 +607,11 @@
   // ------------------------------------------------------------ drawer
   function openDrawer(id) {
     state.drawer = { id: id, loading: true }; renderMain();
-    api('GET', '/ui/api/booking/' + id).then(function (b) { state.drawer = { id: id, b: b }; renderMain(); }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
+    api('GET', '/ui/api/booking/' + id).then(function (b) {
+      state.drawer = { id: id, b: b }; renderMain();
+      // if the company offers a grading form for this interview (addendum 0.3.7), show it
+      if (b.status === 'completed' && !isHistory(b) && ['none', 'draft'].indexOf(b.assessment_status) >= 0) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) { if (state.drawer && state.drawer.id === id && p && p.grading && Array.isArray(p.grading.criteria)) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; renderMain(); } }).catch(function () {});
+    }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
   }
   function drawerEl() {
     var dr = state.drawer; if (!dr) return null;
@@ -626,9 +630,29 @@
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
     var msg = h('p', { class: 'err', id: 'drawermsg' });
-    function run(action) { return api('POST', '/ui/api/booking/' + b.id + '/action', { action: action }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; }); }
+    function run(action) {
+      var payload = { action: action };
+      if (dr.grading && (action === 'save_draft' || action === 'submit')) {
+        var gv = {}; var bad = null; dr.grading.criteria.forEach(function (c) { var v = dr.grades[c.id]; if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > c.max) bad = c; else gv[c.id] = v; });
+        if (bad) { msg.className = 'err'; msg.textContent = 'Enter a number from 0 to ' + bad.max + ' for ' + bad.label + '.'; return Promise.resolve(); }
+        payload.grades = gv; if (dr.note && dr.note.trim()) payload.note = dr.note.trim();
+      }
+      return api('POST', '/ui/api/booking/' + b.id + '/action', payload).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) {
+        if (x.code === 'not_applicable' || /Interview Workspace/.test(String(x.message))) { msg.className = 'note'; msg.textContent = b.company + ' records grades in its own Interview Workspace and does not accept them from the Command Center yet. The request to allow it here has been sent to ' + b.company + '; until it is switched on, save or submit this assessment in the ' + b.company + ' Interview Workspace.'; return; }
+        msg.className = 'err'; msg.textContent = x.message;
+      });
+    }
     function act(label, action, enabled) {
       return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
+    }
+    if (dr.grading && !isHistory(b)) {
+      var gcrit = dr.grading.criteria; var gmax = dr.grading.total_max || gcrit.reduce(function (n, c) { return n + c.max; }, 0); var gtotal = h('strong', { id: 'grade-total', text: '0 / ' + gmax });
+      var gsum = function () { var t = 0; gcrit.forEach(function (c) { var v = dr.grades[c.id]; if (typeof v === 'number' && isFinite(v)) t += v; }); gtotal.textContent = t + ' / ' + gmax + (dr.grading.pass_mark ? ' (pass mark ' + dr.grading.pass_mark + ')' : ''); };
+      box.appendChild(h('div', { class: 'card gradecard' }, h('h3', { text: 'Assessment grades' }),
+        gcrit.map(function (c) { return h('div', { class: 'field' }, h('label', { for: 'gr-' + c.id, text: c.label + ' (0 to ' + c.max + ')' }), h('input', { type: 'number', id: 'gr-' + c.id, min: '0', max: String(c.max), step: '1', value: typeof dr.grades[c.id] === 'number' ? String(dr.grades[c.id]) : '', oninput: function (e) { dr.grades[c.id] = e.target.value === '' ? undefined : Number(e.target.value); gsum(); } })); }),
+        h('div', { class: 'field' }, h('label', { for: 'gr-note', text: 'Note (optional)' }), h('textarea', { id: 'gr-note', rows: '3', maxlength: '2000', oninput: function (e) { dr.note = e.target.value; } }, dr.note || '')),
+        h('p', null, 'Total: ', gtotal), h('p', { class: 'note', text: 'Save the draft, then submit. The company checks the grades with its own rules.' })));
+      gsum();
     }
     if (isHistory(b)) {
       box.appendChild(h('p', { class: 'note history-note', text: 'Handled in the ' + b.company + ' portal, before the Command Center. Grades, the Counselor confirmation and the result e-mail for this interview stay in ' + b.company + '. Shown here as history only; nothing can be sent from here.' }));
