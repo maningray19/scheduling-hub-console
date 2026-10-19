@@ -619,9 +619,22 @@
     var err = h('p', { class: 'err', id: 'login-err', role: 'alert' });
     var email = h('input', { type: 'email', id: 'email', autocomplete: 'username', required: true }); var pw = h('input', { type: 'password', id: 'password', autocomplete: 'current-password', required: true });
     var totp = h('input', { type: 'text', id: 'totp', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '6', required: true });
-    function fail(e) { pw.value = ''; totp.value = ''; err.textContent = e && e.status === 429 ? 'Too many attempts. Try again later.' : 'Sign-in failed. Check your details and code.'; }
+    var status = h('p', { class: 'note login-status', id: 'login-status', role: 'status' });
+    var btn = h('button', { class: 'btn', type: 'submit', text: 'Sign in' }); var stage = '';
+    // visible progress while signing in (the first request can take a few seconds when the service wakes up), and clear reasons when it fails
+    function busy(on, text) { btn.disabled = on; [email, pw, totp].forEach(function (x) { x.disabled = on; }); btn.textContent = on ? 'Signing in...' : 'Sign in'; btn.classList.toggle('loading', on); status.textContent = on ? text : ''; }
+    function fail(e) {
+      busy(false); totp.value = '';
+      err.textContent = e && e.status === 429 ? 'Too many attempts. Wait a few minutes and try again.'
+        : e instanceof TypeError ? 'Could not reach the service. Check your internet connection and try again.'
+        : stage === 'company' ? 'Your e-mail or password was not accepted by the company login. Check them and try again.'
+        : stage === 'companycode' ? 'The two-step code was not accepted. Type the newest code from your authenticator app.'
+        : method === 'local' ? 'Login name, password or code not accepted. Check them and type the newest code.'
+        : 'Your login is correct, but the 6-digit code was not accepted. In your authenticator app use the entry "Scheduling Hub", make sure the phone clock is set to automatic, and type the newest code.';
+      (stage === 'company' ? pw : totp).focus();
+    }
     var form = h('form', { class: 'login', onsubmit: function (ev) {
-      ev.preventDefault(); err.textContent = '';
+      ev.preventDefault(); err.textContent = ''; stage = method === 'local' ? 'core' : 'company'; busy(true, method === 'local' ? 'Signing in...' : 'Checking your login...');
       if (method === 'local') { api('POST', '/ui/api/login', { email: email.value, password: pw.value, totp: totp.value }).then(function () { return init(); }).catch(fail); return; }
       var cfg = window.PIC_SSO[method];
       // password goes only to the company's own login service, never to this application's server
@@ -630,6 +643,7 @@
         .then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); });
       if (cfg.mfa) {   // this company requires its own second factor: get a second-factor (aal2) session with the code from the company's authenticator app
         step = step.then(function (j) {
+          stage = 'companycode'; status.textContent = 'Checking your two-step code...';
           var A = { apikey: cfg.key, 'content-type': 'application/json', authorization: 'Bearer ' + j.access_token };
           return fetch(cfg.url + '/auth/v1/user', { headers: A }).then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); }).then(function (u) {
             var f = (u.factors || []).filter(function (x) { return x.factor_type === 'totp' && x.status === 'verified'; })[0]; if (!f) return { access_token: j.access_token, password_only: true };   // an account without a company second factor: our own code is used instead
@@ -639,12 +653,12 @@
           });
         });
       }
-      step.then(function (j) { var own = !cfg.mfa || j.password_only; pw.value = ''; return api('POST', '/ui/api/login-sso', { company: method, token: j.access_token, totp: own ? totp.value : undefined }); })
+      step.then(function (j) { var own = !cfg.mfa || j.password_only; stage = 'core'; status.textContent = 'Your login is accepted. Opening the Command Center...'; return api('POST', '/ui/api/login-sso', { company: method, token: j.access_token, totp: own ? totp.value : undefined }); })
         .then(function () { return init(); }).catch(fail);
     } }, h('h1', { text: 'Facilitator Command Center' }), h('p', { text: 'Private. Authorised facilitator and management only.' }),
       methods.length > 1 ? h('div', { class: 'seg login-methods', role: 'group', 'aria-label': 'Sign in with' }, methods.map(function (m) { return h('button', { type: 'button', 'aria-pressed': String(method === m[0]), text: m[1], onclick: function () { state.loginMethod = m[0]; render(); } }); })) : null,
       h('div', { class: 'field' }, h('label', { for: 'email', text: method === 'local' ? 'Login name' : 'E-mail (your ' + ((window.PIC_SSO[method] || {}).label || method) + ' login)' }), email), h('div', { class: 'field' }, h('label', { for: 'password', text: 'Password' }), pw),
-      h('div', { class: 'field' }, h('label', { for: 'totp', text: 'Authenticator code' }), totp), h('button', { class: 'btn', type: 'submit', text: 'Sign in' }), err,
+      h('div', { class: 'field' }, h('label', { for: 'totp', text: 'Authenticator code' }), totp), btn, status, err,
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
   }
