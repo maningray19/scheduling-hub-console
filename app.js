@@ -515,13 +515,14 @@
             free.forEach(function (s) { slotBox.appendChild(h('button', { type: 'button', class: 'slot', text: localTime(s.start), onclick: function (ev) { picked = s; slotBox.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); }); ev.target.setAttribute('aria-pressed', 'true'); } })); });
           }).catch(function (x) { slotBox.textContent = ''; slotBox.appendChild(h('p', { class: 'err', text: x.message || 'Could not load the times.' })); });
         } });
-        body.push(day, slotBox);
+        var why = h('input', { type: 'text', maxlength: '300', placeholder: 'Reason (optional)', 'aria-label': 'Reason (optional)' }); field = why;
+        body.push(day, slotBox, why);
       }
       body.push(msg, h('div', { class: 'actions' },
         h('button', { class: 'btn', type: 'button', text: o.kind === 'confirm' ? 'Yes' : 'Confirm', onclick: function () {
           if (o.kind === 'confirm_reason') { if (!field.value || field.value.trim().length < 3) { msg.textContent = 'Write a short reason.'; return; } finish({ reason: field.value.trim() }); }
           else if (o.kind === 'choice') { var c = (o.choices || []).filter(function (x) { return String(x.value) === field.value; })[0]; finish({ value: c ? c.value : field.value }); }
-          else if (o.kind === 'slot') { if (!picked) { msg.textContent = 'Choose a time.'; return; } finish({ start: picked.start, end: picked.end }); }
+          else if (o.kind === 'slot') { if (!picked) { msg.textContent = 'Choose a time.'; return; } var sp = { start: picked.start, end: picked.end }; if (field && field.value.trim()) sp.reason = field.value.trim(); finish(sp); }
           else finish({});
         } }),
         h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { finish(null); } })));
