@@ -486,9 +486,21 @@
       if (method === 'local') { api('POST', '/ui/api/login', { email: email.value, password: pw.value, totp: totp.value }).then(function () { return init(); }).catch(fail); return; }
       var cfg = window.PIC_SSO[method];
       // password goes only to the company's own login service, never to this application's server
-      fetch(cfg.url + '/auth/v1/token?grant_type=password', { method: 'POST', headers: { apikey: cfg.key, 'content-type': 'application/json' }, body: JSON.stringify({ email: email.value.trim(), password: pw.value }) })
-        .then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); })
-        .then(function (j) { pw.value = ''; return api('POST', '/ui/api/login-sso', { company: method, token: j.access_token, totp: totp.value }); })
+      var H = { apikey: cfg.key, 'content-type': 'application/json' };
+      var step = fetch(cfg.url + '/auth/v1/token?grant_type=password', { method: 'POST', headers: H, body: JSON.stringify({ email: email.value.trim(), password: pw.value }) })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); });
+      if (cfg.mfa) {   // this company requires its own second factor: get a second-factor (aal2) session with the code from the company's authenticator app
+        step = step.then(function (j) {
+          var A = { apikey: cfg.key, 'content-type': 'application/json', authorization: 'Bearer ' + j.access_token };
+          return fetch(cfg.url + '/auth/v1/user', { headers: A }).then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); }).then(function (u) {
+            var f = (u.factors || []).filter(function (x) { return x.factor_type === 'totp' && x.status === 'verified'; })[0]; if (!f) return { access_token: j.access_token, password_only: true };   // an account without a company second factor: our own code is used instead
+            return fetch(cfg.url + '/auth/v1/factors/' + f.id + '/challenge', { method: 'POST', headers: A, body: '{}' }).then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); })
+              .then(function (c) { return fetch(cfg.url + '/auth/v1/factors/' + f.id + '/verify', { method: 'POST', headers: A, body: JSON.stringify({ challenge_id: c.id, code: totp.value.trim() }) }); })
+              .then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); });
+          });
+        });
+      }
+      step.then(function (j) { var own = !cfg.mfa || j.password_only; pw.value = ''; return api('POST', '/ui/api/login-sso', { company: method, token: j.access_token, totp: own ? totp.value : undefined }); })
         .then(function () { return init(); }).catch(fail);
     } }, h('h1', { text: 'Facilitator Command Center' }), h('p', { text: 'Private. Authorised facilitator and management only.' }),
       methods.length > 1 ? h('div', { class: 'seg login-methods', role: 'group', 'aria-label': 'Sign in with' }, methods.map(function (m) { return h('button', { type: 'button', 'aria-pressed': String(method === m[0]), text: m[1], onclick: function () { state.loginMethod = m[0]; render(); } }); })) : null,
