@@ -195,7 +195,9 @@
       return h('button', { class: 'chap' + (c.id === cur.id ? ' on' : ''), type: 'button', 'data-chapter': c.id, onclick: function () { state.tutorial = c.id; state.fx = true; renderMain(); } },
         h('span', { class: 'chap-n', text: String(list.indexOf(c) + 1) }), h('span', { class: 'chap-t' }, h('strong', { text: c.title }), h('span', { class: 'note', text: (c.minutes ? c.minutes + ' min - ' : '') + (c.summary || '') })));
     });
-    return h('div', { class: 'tutorials' }, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, h('p', { class: 'note', text: cur.summary || '' })), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
+    var yt = m.youtube && /^[A-Za-z0-9_-]{10,60}$/.test(m.youtube.playlist || '') ? h('div', { class: 'card' }, h('h2', { text: 'Also on YouTube (unlisted playlist)' }),
+      h('iframe', { class: 'player', src: 'https://www.youtube-nocookie.com/embed/videoseries?list=' + m.youtube.playlist, title: 'Tutorial playlist', allow: 'fullscreen', referrerpolicy: 'strict-origin-when-cross-origin' })) : null;
+    return h('div', { class: 'tutorials' }, h('div', null, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, h('p', { class: 'note', text: cur.summary || '' })), yt), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
   }
   function shiftMonth(n) { var d = new Date(state.date + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n, 1); return d.toISOString().slice(0, 10); }
   function breakMarks(ds) {
