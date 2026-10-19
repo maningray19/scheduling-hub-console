@@ -106,6 +106,10 @@ main { padding: 18px 22px 60px; max-width: 1320px; margin: 0 auto; }
 .rankcard.brand-RGOS { border-top: 6px solid var(--rgos-ac); } .rankcard.brand-RGAB { border-top: 6px solid var(--rgab-ac); }
 .rankcard td.rank { font-weight: 800; font-size: 15px; white-space: nowrap; }
 .rankcard tr.top1 { background: color-mix(in srgb, #f5c542 14%, transparent); } .rankcard tr.top2 { background: color-mix(in srgb, #9aa5b1 11%, transparent); } .rankcard tr.top3 { background: color-mix(in srgb, #cd7f32 11%, transparent); }
+.pwwrap { position: relative; display: block; }
+.pwwrap input { width: 100%; padding-right: 74px; box-sizing: border-box; }
+.pwtoggle { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--brand, #0f766e); font: 700 13px/1 inherit; cursor: pointer; padding: 8px 10px; border-radius: 8px; }
+.pwtoggle:hover, .pwtoggle:focus-visible { background: color-mix(in srgb, var(--brand, #0f766e) 12%, transparent); outline: none; }
 .toolbar-group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .funnel-row { display: grid; grid-template-columns: 170px 1fr 44px; gap: 10px; align-items: center; margin: 9px 0; font-size: 13.5px; }
 .funnel-row .fl { color: var(--muted); font-weight: 600; } .funnel-row .fn { text-align: right; font-weight: 800; }

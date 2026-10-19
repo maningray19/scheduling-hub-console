@@ -747,7 +747,7 @@
         .then(function () { return init(); }).catch(fail);
     } }, h('h1', { text: 'Facilitator Command Center' }), h('p', { text: 'Private. Authorised facilitator and management only.' }),
       methods.length > 1 ? h('div', { class: 'seg login-methods', role: 'group', 'aria-label': 'Sign in with' }, methods.map(function (m) { return h('button', { type: 'button', 'aria-pressed': String(method === m[0]), text: m[1], onclick: function () { state.loginMethod = m[0]; render(); } }); })) : null,
-      h('div', { class: 'field' }, h('label', { for: 'email', text: method === 'local' ? 'Login name' : 'E-mail (your ' + ((window.PIC_SSO[method] || {}).label || method) + ' login)' }), email), h('div', { class: 'field' }, h('label', { for: 'password', text: 'Password' }), pw),
+      h('div', { class: 'field' }, h('label', { for: 'email', text: method === 'local' ? 'Login name' : 'E-mail (your ' + ((window.PIC_SSO[method] || {}).label || method) + ' login)' }), email), h('div', { class: 'field' }, h('label', { for: 'password', text: 'Password' }), h('div', { class: 'pwwrap' }, pw, h('button', { type: 'button', class: 'pwtoggle', 'aria-pressed': 'false', 'aria-label': 'Show password', text: 'Show', onclick: function (e) { var on = pw.type === 'password'; pw.type = on ? 'text' : 'password'; e.target.textContent = on ? 'Hide' : 'Show'; e.target.setAttribute('aria-pressed', String(on)); e.target.setAttribute('aria-label', on ? 'Hide password' : 'Show password'); pw.focus(); } }))),
       h('div', { class: 'field' }, h('label', { for: 'totp', text: 'Authenticator code' }), totp), btn, status, err,
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
