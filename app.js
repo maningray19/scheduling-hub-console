@@ -629,6 +629,7 @@
       ['Company branding', d.branding || '-']];
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
+    if (isFac && !isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
     var msg = h('p', { class: 'err', id: 'drawermsg' });
     function run(action) {
       var payload = { action: action };
@@ -696,6 +697,31 @@
       empty ? h('p', { class: 'note', text: 'No assessment result is recorded for this interview yet, so there is nothing to show. The company system fills this in once the result exists.' }) : null,
       h('p', { class: 'note', text: [br.signature, p.delivery].filter(Boolean).join(' | ') }),
       brandOk(p) ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
+  }
+  // The client's uploaded documents, side by side. Fetched live from the owning company when opened; nothing is stored here and every view is audited.
+  function showDocuments(b) {
+    var grid = h('div', { class: 'docgrid' }, h('p', { class: 'note', text: 'Loading documents...' })); var urls = [];
+    var dlg = h('dialog', { id: 'docs-dialog', class: 'docs-dialog' },
+      h('div', { class: 'docs-head' }, h('h3', { text: 'Uploaded documents - ' + (((b.details || {}).client_name) || b.company) }), h('button', { class: 'btn secondary', type: 'button', id: 'docs-close', text: 'Close', onclick: function () { dlg.close(); } })),
+      h('p', { class: 'note', text: 'Shown live from ' + b.company + '. Nothing is saved in the Command Center, and every view is recorded in the audit history.' }), grid);
+    dlg.addEventListener('close', function () { urls.forEach(function (u) { URL.revokeObjectURL(u); }); dlg.remove(); });
+    document.body.appendChild(dlg); dlg.showModal();
+    api('GET', '/ui/api/booking/' + b.id + '/documents').then(function (l) {
+      grid.textContent = '';
+      if (!l.items.length) { grid.appendChild(h('p', { class: 'note', text: 'The company has no uploaded documents for this interview.' })); return; }
+      l.items.forEach(function (d) {
+        var body = h('div', { class: 'docbody' }, h('p', { class: 'note', text: 'Loading...' }));
+        grid.appendChild(h('div', { class: 'docpanel' }, h('h4', { text: d.label }), body));
+        api('GET', '/ui/api/booking/' + b.id + '/documents/' + encodeURIComponent(d.id)).then(function (f) {
+          var bin = atob(f.data_base64); var arr = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          var u = URL.createObjectURL(new Blob([arr], { type: f.mime })); urls.push(u); body.textContent = '';
+          body.appendChild(f.mime === 'application/pdf' ? h('iframe', { class: 'docframe', src: u, title: d.label }) : h('img', { class: 'docimg', src: u, alt: d.label }));
+        }).catch(function () { body.textContent = ''; body.appendChild(h('p', { class: 'err', text: 'This document could not be opened.' })); });
+      });
+    }).catch(function (e) {
+      grid.textContent = '';
+      grid.appendChild(h('p', { class: 'err', text: (e.status === 404 || e.status === 403 || e.status === 409) ? b.company + ' has not switched on document viewing from the Command Center yet.' : 'The documents could not be loaded.' }));
+    });
   }
   function showPreview(b, msg) {
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
