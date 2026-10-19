@@ -261,6 +261,92 @@
       sec('No-show records', all.filter(function (i) { return i.status === 'no_show'; }), 'None.'));
   }
 
+  // ------------------------------------------------------------ results sent: what happened to every released assessment result
+  // The core knows when a result was released; e-mail delivery, opening and the client's answer are reported by the owning company.
+  var RES_STATE = {
+    accepted: ['Accepted', 'ok'], rejected: ['Rejected', 'bad'], ignored: ['Ignored', 'warn'], opened: ['Opened', ''], delivered: ['Delivered', ''], sent: ['Sent', ''],
+    bounced: ['Not delivered', 'bad'], waiting_for_company: ['Waiting for company report', 'warn']
+  };
+  // Reporting periods in Dubai time. Weeks run Monday to Sunday; months are calendar months. Returns [first day, day after the last day].
+  var RES_PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['lastweek', 'Last week'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['month', 'This month'], ['lastmonth', 'Last month'], ['custom', 'Custom range']];
+  function resRange() {
+    var t = todayDubai(); var k = state.resPreset || '30d';
+    var mon = addDays(t, -((new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7)); var m1 = t.slice(0, 8) + '01';
+    var prevM = function (ds) { var d = new Date(ds + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); };
+    var nextM = function (ds) { var d = new Date(ds + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); };
+    if (k === 'today') return [t, addDays(t, 1)];
+    if (k === 'yesterday') return [addDays(t, -1), t];
+    if (k === 'week') return [mon, addDays(mon, 7)];
+    if (k === 'lastweek') return [addDays(mon, -7), mon];
+    if (k === '7d') return [addDays(t, -6), addDays(t, 1)];
+    if (k === 'month') return [m1, nextM(m1)];
+    if (k === 'lastmonth') return [prevM(m1), m1];
+    if (k === 'custom' && state.resFrom && state.resTo && state.resFrom <= state.resTo) return [state.resFrom, addDays(state.resTo, 1)];
+    return [addDays(t, -29), addDays(t, 1)];
+  }
+  function resultsTab() {
+    var r = state.tabData.results;
+    var preset = h('select', { id: 'res-preset', 'aria-label': 'Reporting period', onchange: function (e) { state.resPreset = e.target.value; refreshTab(); } }, RES_PRESETS.map(function (o) { return h('option', { value: o[0], text: o[1], selected: (state.resPreset || '30d') === o[0] }); }));
+    var rg = resRange(); var win = h('div', { class: 'toolbar-group' }, preset);
+    if ((state.resPreset || '') === 'custom') { win.appendChild(h('input', { type: 'date', id: 'res-from', value: state.resFrom || rg[0], 'aria-label': 'From', onchange: function (e) { state.resFrom = e.target.value; state.resTo = state.resTo || e.target.value; refreshTab(); } })); win.appendChild(h('input', { type: 'date', id: 'res-to', value: state.resTo || addDays(rg[1], -1), 'aria-label': 'To', onchange: function (e) { state.resTo = e.target.value; state.resFrom = state.resFrom || e.target.value; refreshTab(); } })); }
+    win.appendChild(h('span', { class: 'note', text: rg[0] + (addDays(rg[1], -1) !== rg[0] ? ' to ' + addDays(rg[1], -1) : '') + ' (Dubai)' }));
+    var bar = h('div', { class: 'toolbar' }, win, companyFilter(), h('button', { class: 'btn secondary', type: 'button', text: 'Refresh', onclick: function () { refreshTab(); } }));
+    if (!r) return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : h('p', { class: 'note', text: 'Loading...' }));
+    var c = r.counts, p = r.pipeline;
+    function pct(n) { return c.released ? Math.round(100 * n / c.released) + '% of sent' : ''; }
+    function tile(cls, num, lbl, sub) { return h('div', { class: 'stat ' + cls }, h('span', { class: 'num', text: String(num) }), h('span', { class: 'lbl', text: lbl }), sub ? h('span', { class: 'note', text: sub }) : null); }
+    var tiles = h('div', { class: 'stats' },
+      tile('s-ALL', p.interviews_completed, 'Interviews completed', p.no_show ? p.no_show + ' no-show' : ''),
+      tile('s-ALL', p.assessment_submitted, 'Assessments written', p.with_advisor + ' with an advisor, ' + p.approved_not_released + ' ready to send'),
+      tile('s-ALL', c.released, 'Results sent', 'released from here'),
+      tile('s-ALL', c.delivered, 'Received (e-mail delivered)', pct(c.delivered)),
+      tile('s-ALL', c.opened, 'Opened', pct(c.opened)),
+      tile('s-RGAB', c.accepted, 'Accepted', pct(c.accepted)),
+      tile('s-ATT', c.rejected, 'Rejected', pct(c.rejected)),
+      tile('s-ATT', c.ignored, 'Ignored', 'no answer after ' + r.ignore_after_days + ' days'),
+      tile('s-ATT', c.bounced, 'Not delivered', 'bounced or failed'),
+      tile('s-ATT', c.waiting_for_company, 'Waiting for company report', 'sent, but the company has not reported yet'));
+    var steps = [['Interviews completed', p.interviews_completed], ['Assessments written', p.assessment_submitted], ['Results sent', c.released], ['Delivered', c.delivered], ['Opened', c.opened], ['Accepted', c.accepted]];
+    var top = Math.max(1, p.interviews_completed, p.assessment_submitted, c.released);
+    var funnel = h('div', { class: 'card' }, h('h2', { text: 'From interview to answer' }), steps.map(function (s) {
+      var fill = h('span', { class: 'fill' }); fill.style.width = Math.max(s[1] ? 2 : 0, Math.round(100 * s[1] / top)) + '%';
+      return h('div', { class: 'funnel-row' }, h('span', { class: 'fl', text: s[0] }), h('span', { class: 'ftrack' }, fill), h('span', { class: 'fn', text: String(s[1]) }));
+    }));
+    function cell(co) { var b = r.by_company[co] || {}; return [co, b.released || 0, b.delivered || 0, b.opened || 0, b.accepted || 0, b.rejected || 0, b.ignored || 0, b.bounced || 0, b.waiting_for_company || 0]; }
+    var per = h('div', { class: 'card scroll-x' }, h('h2', { text: 'By company' }),
+      h('table', null, h('thead', null, h('tr', null, ['Company', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Ignored', 'Not delivered', 'Waiting'].map(function (x) { return h('th', { text: x }); }))),
+        h('tbody', null, ['RGOS', 'RGAB'].filter(function (co) { return !state.company || state.company === co; }).map(function (co) { return h('tr', null, cell(co).map(function (x, i) { return h('td', { text: String(x), class: i === 0 ? 'co ' + co : '' }); })); }))));
+    function rate(a, b) { return b > 0 ? Math.round(1000 * a / b) / 10 + '%' : 'N/A'; }
+    var advRows = (r.by_advisor || []).map(function (a) {
+      var decided = a.accepted + a.rejected;
+      return h('tr', null, h('td', { text: a.advisor_name || ('Advisor ' + String(a.advisor_ref).slice(0, 8)) }), h('td', null, h('span', { class: 'co ' + a.company, text: a.company })),
+        [a.released, a.delivered, a.opened, a.accepted, a.rejected, a.released - decided - a.bounced - a.waiting_for_company - a.ignored, a.ignored].map(function (x) { return h('td', { text: String(x) }); }),
+        h('td', { text: rate(a.delivered, a.released) }), h('td', { text: rate(a.accepted, decided) + (decided ? ' (of ' + decided + ')' : '') }), h('td', { text: rate(a.rejected, decided) }),
+        h('td', { text: a.avg_answer_hours === null || a.avg_answer_hours === undefined ? 'N/A' : a.avg_answer_hours + ' h' }));
+    });
+    var advisors = h('div', { class: 'card scroll-x' }, h('h2', { text: 'By advisor / counselor' }),
+      h('p', { class: 'note', text: 'Acceptance and rejection rate = accepted (or rejected) divided by the results the client has answered; the number it is based on is shown. N/A means there is nothing to divide by yet. Answer time = from sending to the client answer.' }),
+      advRows.length ? h('table', null, h('thead', null, h('tr', null, ['Advisor', 'Company', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Pending', 'Ignored', 'Delivery rate', 'Acceptance rate', 'Rejection rate', 'Avg answer time'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, advRows))
+        : h('p', { class: 'note', text: 'No results were sent in this period.' }));
+    var rows = r.items.map(function (i) {
+      var st = RES_STATE[i.state] || [i.state, '']; var ev = i.events || {};
+      var when = function (k) { return ev[k] ? localDate(ev[k]) + ' ' + localTime(ev[k]) : '-'; };
+      var delivered = ev.email_delivered || ev.opened || ev.accepted || ev.rejected;
+      return h('tr', null,
+        h('td', { text: localDate(i.released_at) + ' ' + localTime(i.released_at) }), h('td', null, h('span', { class: 'co ' + i.company, text: i.company })),
+        h('td', { text: (i.history ? 'Client ' + String(i.client_ref).slice(0, 10) + ' (earlier record)' : (i.client_name || (i.details_unavailable ? 'Details unavailable' : ''))) + (i.advisor_name ? ' (' + i.advisor_name + ')' : '') }), h('td', { text: i.start ? localDate(i.start) + ' ' + localTime(i.start) : '-' }),
+        h('td', { text: ev.email_bounced && !delivered ? 'Not delivered' : delivered ? 'Delivered' : ev.email_sent ? 'Sent' : '-' }),
+        h('td', { text: ev.opened || ev.accepted || ev.rejected ? 'Yes' + (ev.opened ? ' - ' + when('opened') : '') : 'No' }),
+        h('td', { text: ev.accepted ? 'Accepted ' + when('accepted') : ev.rejected ? 'Rejected ' + when('rejected') : '-' }),
+        h('td', null, h('span', { class: 'chip ' + st[1], text: st[0] })));
+    });
+    var sent = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Sent items (' + r.items.length + ')' }),
+      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent. "Waiting for company report" means the result was released but the company system has not reported on it yet.' }),
+      r.items.length ? h('table', null, h('thead', null, h('tr', null, ['Sent', 'Company', 'Client', 'Interview', 'E-mail', 'Opened', 'Client answer', 'Status'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
+        : h('p', { class: 'note', text: 'No results were sent in this period.' }));
+    return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
+  }
+
   // ------------------------------------------------------------ availability
   function availabilityTab() {
     var a = state.tabData.avail || { unavailability: [], recurring: [] };
@@ -514,7 +600,7 @@
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
   }
-  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
+  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   function mainShell() {
     var u = state.user; var frozen = state.controls && (state.controls.bookings_enabled === false || state.controls.releases_enabled === false);
@@ -531,7 +617,7 @@
   function renderMain() {
     var m = document.getElementById('main'); if (!m) return;
     m.textContent = '';
-    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
+    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     m.appendChild(body); var d = drawerEl(); if (d) m.appendChild(d);
     document.querySelectorAll('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === state.tab)); });
@@ -546,6 +632,7 @@
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
     if (t === 'calendar') { jobs.push(loadCalendar()); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
+    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
