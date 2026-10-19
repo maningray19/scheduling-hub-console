@@ -476,7 +476,7 @@
   // ------------------------------------------------------------ notices (the owner writes, the facilitator reads and presses "Got it")
   function loadNotices() { if (limited()) return Promise.resolve(); return api('GET', '/ui/api/notices').then(function (r) { state.notices = r.items; }).catch(function () {}); }
   function noticesBar() {
-    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked; }); if (!open.length) return null;
+    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked && !n.mandatory; }); if (!open.length) return null;
     return h('div', { class: 'notices' }, open.map(function (n) {
       return h('div', { class: 'notice', role: 'alert' }, h('strong', { class: 'notice-t', text: n.title }), h('p', { class: 'notice-b', text: n.body }),
         h('div', { class: 'notice-f' }, h('span', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) }),
@@ -487,14 +487,88 @@
     var list = (state.tabData.noticesAll || { items: [] }).items; var msg = h('p', { class: 'err', id: 'noticemsg' });
     var title = h('input', { type: 'text', id: 'nt-title', maxlength: '140', placeholder: 'Title', 'aria-label': 'Notice title' });
     var body = h('textarea', { id: 'nt-body', rows: '4', maxlength: '4000', placeholder: 'What the facilitator should know or do', 'aria-label': 'Notice text' });
+    var gated = h('input', { type: 'checkbox', id: 'nt-gated' });
     var aud = h('select', { id: 'nt-aud', 'aria-label': 'Who sees it' }, [['facilitator', 'The facilitator (Aira) and owners'], ['all', 'Everyone who signs in']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
     return h('div', { class: 'card' }, h('h2', { text: 'Notices' }), h('p', { class: 'note', text: 'A notice shows at the top of the Command Center until the person presses "Got it". It is recorded who saw it and when.' }),
-      h('div', { class: 'field' }, h('label', { text: 'Title' }), title), h('div', { class: 'field' }, h('label', { text: 'Text' }), body), h('div', { class: 'field' }, h('label', { text: 'Show to' }), aud),
-      h('button', { class: 'btn', type: 'button', text: 'Post notice', onclick: function () { api('POST', '/ui/api/notices', { title: title.value, body: body.value, audience: aud.value }).then(function () { title.value = ''; body.value = ''; return refreshTab(); }).catch(function (x) { msg.textContent = x.message; }); } }), msg,
+      h('div', { class: 'field' }, h('label', { text: 'Title' }), title), h('div', { class: 'field' }, h('label', { text: 'Text' }), body), h('div', { class: 'field' }, h('label', { text: 'Show to' }), aud), h('div', { class: 'field' }, h('label', { for: 'nt-gated', text: 'Gated: the person must press "Got it" before using the Command Center' }), gated),
+      h('button', { class: 'btn', type: 'button', text: 'Post notice', onclick: function () { api('POST', '/ui/api/notices', { title: title.value, body: body.value, audience: aud.value, mandatory: gated.checked }).then(function () { title.value = ''; body.value = ''; return refreshTab(); }).catch(function (x) { msg.textContent = x.message; }); } }), msg,
       list.length ? h('table', null, h('thead', null, h('tr', null, ['Posted', 'Title', 'Seen by', ''].map(function (x) { return h('th', { text: x }); }))),
         h('tbody', null, list.map(function (n) { var seen = (n.acked_by || []).map(function (a) { return a.name + ' ' + localDate(a.at) + ' ' + localTime(a.at); }).join('; ');
           return h('tr', null, h('td', { text: localDate(n.created_at) + ' ' + localTime(n.created_at) }), h('td', { text: n.title + (n.active ? '' : ' (removed)') }), h('td', { text: seen || 'Not seen yet' }),
             h('td', null, n.active ? h('button', { class: 'btn secondary', type: 'button', text: 'Remove', onclick: function () { api('DELETE', '/ui/api/notices/' + n.id).then(refreshTab); } }) : null)); }))) : h('p', { class: 'note', text: 'No notices yet.' }));
+  }
+  // ------------------------------------------------------------ workspace functions (the company describes them; the Command Center shows and carries them)
+  function askDialog(o) {   // o: { title, text, kind: confirm|confirm_reason|choice|slot, choices, reasonLabel, bookingId } -> Promise of params, or null when cancelled
+    return new Promise(function (resolve) {
+      var msg = h('p', { class: 'err', role: 'alert' }); var done = false; var field = null; var picked = null;
+      var finish = function (v) { if (done) return; done = true; dlg.close(); dlg.remove(); resolve(v); };
+      var body = [h('h3', { text: o.title }), o.text ? h('p', { text: o.text }) : null];
+      if (o.kind === 'confirm_reason') { field = h('textarea', { rows: '3', maxlength: '500', 'aria-label': o.reasonLabel || 'Reason' }); body.push(h('label', { text: o.reasonLabel || 'Reason' }), field); }
+      if (o.kind === 'choice') { field = h('select', { 'aria-label': 'Choose' }, (o.choices || []).map(function (c) { return h('option', { value: String(c.value), text: c.label }); })); body.push(field); }
+      if (o.kind === 'slot') {
+        var slotBox = h('div', { class: 'slotbox' }, h('p', { class: 'note', text: 'Pick a day to see the free times.' }));
+        var day = h('input', { type: 'date', 'aria-label': 'New day', min: todayDubai(), onchange: function (e) {
+          if (!e.target.value) return; slotBox.textContent = ''; slotBox.appendChild(h('p', { class: 'note', text: 'Loading...' })); picked = null;
+          api('GET', '/ui/api/booking/' + o.bookingId + '/slots?date=' + encodeURIComponent(e.target.value)).then(function (r) {
+            slotBox.textContent = ''; var free = (r.slots || []).filter(function (s) { return s.state === 'available'; });
+            if (!free.length) { slotBox.appendChild(h('p', { class: 'note', text: 'No free time on that day.' })); return; }
+            free.forEach(function (s) { slotBox.appendChild(h('button', { type: 'button', class: 'slot', text: localTime(s.start), onclick: function (ev) { picked = s; slotBox.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); }); ev.target.setAttribute('aria-pressed', 'true'); } })); });
+          }).catch(function (x) { slotBox.textContent = ''; slotBox.appendChild(h('p', { class: 'err', text: x.message || 'Could not load the times.' })); });
+        } });
+        body.push(day, slotBox);
+      }
+      body.push(msg, h('div', { class: 'actions' },
+        h('button', { class: 'btn', type: 'button', text: o.kind === 'confirm' ? 'Yes' : 'Confirm', onclick: function () {
+          if (o.kind === 'confirm_reason') { if (!field.value || field.value.trim().length < 3) { msg.textContent = 'Write a short reason.'; return; } finish({ reason: field.value.trim() }); }
+          else if (o.kind === 'choice') { var c = (o.choices || []).filter(function (x) { return String(x.value) === field.value; })[0]; finish({ value: c ? c.value : field.value }); }
+          else if (o.kind === 'slot') { if (!picked) { msg.textContent = 'Choose a time.'; return; } finish({ start: picked.start, end: picked.end }); }
+          else finish({});
+        } }),
+        h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { finish(null); } })));
+      var dlg = h('dialog', { class: 'ask-dialog' }, body); dlg.addEventListener('close', function () { finish(null); }); document.body.appendChild(dlg); dlg.showModal();
+    });
+  }
+  function workspaceCard(b, dr, msg) {
+    var ws = dr.workspace; if (!ws || !ws.actions || !ws.actions.length) return null;
+    return h('div', { class: 'card workspace' }, h('h3', { text: 'More functions from ' + b.company }),
+      ws.result_email && ws.result_email.label ? h('p', { class: 'note', text: 'Result e-mail: ' + ws.result_email.label }) : null,
+      h('div', { class: 'actions' }, ws.actions.map(function (a) {
+        return h('button', { class: 'btn secondary', type: 'button', 'data-ws': a.id, text: a.label, onclick: function () {
+          askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label, bookingId: b.id }).then(function (params) {
+            if (!params) return; msg.className = 'err'; msg.textContent = '';
+            return api('POST', '/ui/api/booking/' + b.id + '/action', { action: a.id, params: params }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+          });
+        } });
+      })));
+  }
+  function listsTab(name) {
+    var data = state.tabData['list_' + name]; var title = name === 'offers' ? 'Offer follow-up' : 'Advisor confirmations';
+    var bar = h('div', { class: 'toolbar' }, companyFilter(), h('button', { class: 'btn secondary', type: 'button', text: 'Refresh', onclick: function () { refreshTab(); } }));
+    if (!data) return h('div', null, bar, h('p', { class: 'note', text: 'Loading...' }));
+    var msg = h('p', { class: 'err', id: 'listmsg' });
+    return h('div', null, bar, msg, data.sections.map(function (sec) {
+      var head = h('h2', null, companyBadge(sec.company), ' ' + (sec.title || title) + ' (' + sec.company + ')');
+      if (sec.error) return h('div', { class: 'card' }, head, h('p', { class: 'note', text: sec.company + ' has not switched this on yet.' }));
+      return h('div', { class: 'card scroll-x' }, head, sec.note ? h('p', { class: 'note', text: sec.note }) : null,
+        sec.rows.length ? h('table', null, h('thead', null, h('tr', null, sec.columns.map(function (c) { return h('th', { text: c.label }); }).concat([h('th', { text: '' })]))),
+          h('tbody', null, sec.rows.map(function (r) {
+            return h('tr', null, sec.columns.map(function (c) { return h('td', { text: r.cells[c.id] || '' }); }).concat([h('td', null, r.actions.map(function (a) {
+              return h('button', { class: 'btn secondary', type: 'button', text: a.label, onclick: function () {
+                askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label }).then(function (params) {
+                  if (!params) return; msg.textContent = '';
+                  return api('POST', '/ui/api/lists/' + name + '/action', { company: sec.company, row_id: r.id, action: a.id, params: params }).then(function () { return refreshTab(); }).catch(function (x) { msg.textContent = x.message; });
+                });
+              } });
+            }))]));
+          }))) : h('p', { class: 'note', text: 'Nothing here.' }));
+    }));
+  }
+  // a gated (mandatory) notice covers the screen until the person presses "Got it"
+  function gateOverlay() {
+    var n = (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; })[0]; document.body.classList.toggle('gated', !!n); if (!n) return null;
+    return h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': n.title }, h('div', { class: 'gate-box' }, h('h2', { text: n.title }), h('p', { class: 'notice-b', text: n.body }),
+      h('p', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. You must press "Got it" to continue.' }),
+      h('button', { class: 'btn', type: 'button', id: 'gate-ok', text: 'Got it', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', {}).then(function () { n.acked = true; return loadNotices(); }).then(function () { renderMain(); }).catch(function () { e.target.disabled = false; }); } })));
   }
   // ------------------------------------------------------------ availability
   function availabilityTab() {
@@ -652,7 +726,12 @@
       state.drawer = { id: id, b: b }; renderMain();
       if (limited()) return;
       // if the company offers a grading form for this interview (addendum 0.3.7), show it
-      if (b.status === 'completed' && !isHistory(b) && ['none', 'draft'].indexOf(b.assessment_status) >= 0) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) { if (state.drawer && state.drawer.id === id && p && p.grading && Array.isArray(p.grading.criteria)) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; renderMain(); } }).catch(function () {});
+      if (['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) {
+        if (!(state.drawer && state.drawer.id === id && p)) return; var changed = false;
+        if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria)) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
+        if (p.workspace && p.workspace.actions && p.workspace.actions.length) { state.drawer.workspace = p.workspace; changed = true; }
+        if (changed) renderMain();
+      }).catch(function () {});
     }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
   }
   function drawerEl() {
@@ -713,6 +792,7 @@
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
     if (!isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
     box.appendChild(msg);
+    var wsCard = workspaceCard(b, dr, msg); if (wsCard) box.appendChild(wsCard);
     box.appendChild(h('h3', { text: 'History' }));
     box.appendChild(h('ul', { class: 'timeline' }, (b.events || []).map(function (e) { return h('li', { text: localDate(e.at) + ' ' + localTime(e.at) + ' - ' + e.event.replace(/_/g, ' ') }); })));
     return box;
@@ -857,11 +937,11 @@
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
   }
-  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
+  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   function mainShell() {
     var u = state.user; var frozen = state.controls && (state.controls.bookings_enabled === false || state.controls.releases_enabled === false);
-    var tabs = limited() ? TABS.filter(function (t) { return t[0] === 'calendar'; }) : TABS.filter(function (t) { return t[0] !== 'management' || u.role === 'approver' || u.role === 'viewer'; });
+    var tabs = limited() ? TABS.filter(function (t) { return t[0] === 'calendar'; }) : TABS.filter(function (t) { if (['confirmations', 'offers'].indexOf(t[0]) >= 0) return u.role === 'facilitator' || u.role === 'approver'; return t[0] !== 'management' || u.role === 'approver' || u.role === 'viewer'; });
     return h('div', null,
       frozen ? h('div', { class: 'banner', role: 'alert', text: 'EMERGENCY FREEZE ACTIVE: new bookings' + (state.controls.releases_enabled === false ? ' and result releases are' : ' are') + ' disabled. Existing appointments are unaffected.' }) : null,
       window.PIC_ENV === 'live' ? null : h('div', { class: 'synth', text: 'DEVELOPMENT BUILD - synthetic data only. Assessment templates shown are clearly marked placeholders, not approved templates.' }),
@@ -874,9 +954,10 @@
   function renderMain() {
     var m = document.getElementById('main'); if (!m) return;
     m.textContent = '';
-    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
+    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     var nb = noticesBar(); if (nb) m.appendChild(nb);
+    var oldGate = document.querySelector('.gate'); if (oldGate) oldGate.remove(); var gate = gateOverlay(); if (gate) document.body.appendChild(gate);
     m.appendChild(body); var d = drawerEl(); if (d) m.appendChild(d);
     document.querySelectorAll('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === state.tab)); });
   }
@@ -885,12 +966,13 @@
     if (!state.user) { root.appendChild(loginView()); return; }
     root.appendChild(mainShell()); renderMain();
   }
-  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll]); }
+  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll, state.tabData.list_confirmations, state.tabData.list_offers]); }
   function refreshTab(quiet) {
     var before = quiet ? snap() : null; var t = state.tab; var jobs = [loadNotices()];
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
     if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); if (!limited()) jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
+    if (t === 'confirmations' || t === 'offers') jobs.push(api('GET', '/ui/api/lists/' + t + (state.company ? '?company=' + state.company : '')).then(function (x) { state.tabData['list_' + t] = x; }).catch(function () {}));
     if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (rq === resKey()) state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));

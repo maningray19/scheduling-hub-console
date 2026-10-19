@@ -126,6 +126,13 @@ main { padding: 18px 22px 60px; max-width: 1320px; margin: 0 auto; }
 .notice-f { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .watermark { position: fixed; inset: 0; z-index: 20; pointer-events: none; display: grid; grid-template-columns: repeat(3, 1fr); align-content: space-around; overflow: hidden; opacity: .16; }
 .watermark span { transform: rotate(-24deg); font: 800 20px/1.2 Segoe UI, system-ui, sans-serif; color: #111; text-align: center; white-space: nowrap; padding: 26px 0; }
+.gate { position: fixed; inset: 0; z-index: 5000; background: #050a1ae6; display: grid; place-items: center; padding: 20px; }
+.gate-box { background: var(--panel, #fff); border-radius: 16px; padding: 22px 26px; max-width: 640px; max-height: 90vh; overflow: auto; box-shadow: 0 30px 80px #000a; border-top: 8px solid var(--warn, #b45309); }
+body.gated { overflow: hidden; }
+.ask-dialog { border: 0; border-radius: 16px; padding: 20px 24px; min-width: min(560px, 92vw); box-shadow: 0 30px 80px #000a; }
+.ask-dialog::backdrop { background: #050a1acc; }
+.slotbox { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; max-height: 260px; overflow: auto; }
+.workspace { margin-top: 12px; }
 .toolbar-group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .funnel-row { display: grid; grid-template-columns: 170px 1fr 44px; gap: 10px; align-items: center; margin: 9px 0; font-size: 13.5px; }
 .funnel-row .fl { color: var(--muted); font-weight: 600; } .funnel-row .fn { text-align: right; font-weight: 800; }
