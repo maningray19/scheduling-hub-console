@@ -131,7 +131,7 @@
       phase(it) === 'ongoing' ? chip('Ongoing now', 'warn') : null,
       it.rescheduled ? chip('Rescheduled', 'warn') : null,
       d.documents ? chip('Docs: ' + (d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'complete' : 'incomplete'), d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'ok' : 'warn') : null,
-      it.pre_launch ? chip('Handled in ' + it.company + ' portal (history)', '') : chip('Assessment: ' + (ASSESS[it.assessment_status] || it.assessment_status), it.assessment_status === 'released' ? 'ok' : ''),
+      isHistory(it) ? chip('Handled in ' + it.company + ' portal (history)', '') : chip('Assessment: ' + (ASSESS[it.assessment_status] || it.assessment_status), it.assessment_status === 'released' ? 'ok' : ''),
       d.advisor_confirmation ? chip('Advisor: ' + d.advisor_confirmation.replace('_', ' '), d.advisor_confirmation === 'confirmed' ? 'ok' : (d.advisor_confirmation === 'pending' ? 'warn' : '')) : null,
       d.verification_status ? chip('Verification: ' + d.verification_status, d.verification_status === 'verified' ? 'ok' : '') : null,
       d.result_release ? chip('Release: ' + d.result_release.replace('_', ' '), d.result_release === 'released' ? 'ok' : (d.result_release === 'ready' ? 'warn' : '')) : null);
@@ -144,6 +144,9 @@
   var STATUS_MENU = [['', 'All interviews'], ['upcoming', 'Upcoming'], ['ongoing', 'Ongoing now'], ['attended', 'Attended (completed)'], ['cancelled', 'Cancelled'], ['no_show', 'No-show'], ['rescheduled', 'Rescheduled']];
   var ASSESS_MENU = [['', 'Any assessment'], ['none', 'Not started'], ['draft', 'Draft'], ['submitted', 'Submitted'], ['awaiting_advisor', 'Awaiting advisor'], ['approved', 'Approved'], ['released', 'Released']];
   function phase(it) { var now = Date.now(); return it.status === 'confirmed' ? (Date.parse(it.start) <= now && now < Date.parse(it.end) ? 'ongoing' : (Date.parse(it.start) > now ? 'upcoming' : 'overdue')) : it.status; }
+  // An older interview (imported after it took place) is read-only history only while its company system supplies no Counselor or job for it;
+  // as soon as the company returns them (RGAB owner's decision 2026-10-19), the normal buttons come back by themselves.
+  function isHistory(x) { var d = x.details || {}; return !!x.pre_launch && !d.advisor_name && !d.job_position && !d.advisor_confirmation; }
   function matches(it) {
     if (state.company && it.company !== state.company) return false;
     if (state.status) { var ph = phase(it); if (state.status === 'rescheduled' ? !it.rescheduled : state.status === 'attended' ? it.status !== 'completed' : state.status === 'upcoming' ? ph !== 'upcoming' : state.status === 'ongoing' ? ph !== 'ongoing' : it.status !== state.status) return false; }
@@ -212,7 +215,7 @@
   function statsStrip() {
     var items = (state.items || []).filter(function (i) { return i.status !== 'cancelled'; });
     var by = function (c) { return items.filter(function (i) { return i.company === c; }).length; };
-    var attention = items.filter(function (i) { if (i.pre_launch) return false;  return i.status === 'completed' && ['none', 'draft', 'submitted'].indexOf(i.assessment_status) >= 0 || i.assessment_status === 'awaiting_advisor' || (i.assessment_status === 'approved' && i.status === 'completed'); }).length;
+    var attention = items.filter(function (i) { if (isHistory(i)) return false;  return i.status === 'completed' && ['none', 'draft', 'submitted'].indexOf(i.assessment_status) >= 0 || i.assessment_status === 'awaiting_advisor' || (i.assessment_status === 'approved' && i.status === 'completed'); }).length;
     var scope = state.view === 'day' ? 'this day' : state.view === 'week' ? 'this week' : 'this month';
     function tile(cls, num, lbl, company, tip) { return h('button', { class: 'stat ' + cls, type: 'button', 'aria-pressed': String(state.company === company && cls !== 's-ATT'), title: tip,
       onclick: function () { if (cls === 's-ATT') { state.tab = 'queues'; refresh(); return; } state.company = company; refresh(); } }, h('span', { class: 'num', text: String(num) }), h('span', { class: 'lbl', text: lbl })); }
@@ -277,7 +280,7 @@
     t.appendChild(tb); return h('div', { class: 'scroll-x' }, t);
   }
   function queuesTab() {
-    var all = (state.wide || []).filter(matches).filter(function (i) { return !i.pre_launch; }); var now = Date.now();
+    var all = (state.wide || []).filter(matches).filter(function (i) { return !isHistory(i); }); var now = Date.now();
     var sec = function (title, rows, empty) { return h('div', { class: 'card' }, h('h2', { text: title + ' (' + rows.length + ')' }), queueTable(rows, empty)); };
     var upcoming = all.filter(function (i) { return i.status === 'confirmed' && Date.parse(i.end) >= now; });
     var needResult = all.filter(function (i) { return i.status === 'completed' && ['none', 'draft', 'submitted'].indexOf(i.assessment_status) >= 0; });
@@ -537,7 +540,7 @@
     function act(label, action, enabled) {
       return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
     }
-    if (b.pre_launch) {
+    if (isHistory(b)) {
       box.appendChild(h('p', { class: 'note history-note', text: 'Handled in the ' + b.company + ' portal, before the Command Center. Grades, the Counselor confirmation and the result e-mail for this interview stay in ' + b.company + '. Shown here as history only; nothing can be sent from here.' }));
     } else if (isFac) {
       var done = b.status === 'completed'; var sched = b.status === 'confirmed';
@@ -547,7 +550,7 @@
         act('Send to advisor for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
         h('button', { class: 'btn', type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), onclick: function () { confirmRelease(b, msg); } })));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
-    if (!b.pre_launch) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
+    if (!isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
     box.appendChild(msg);
     box.appendChild(h('h3', { text: 'History' }));
     box.appendChild(h('ul', { class: 'timeline' }, (b.events || []).map(function (e) { return h('li', { text: localDate(e.at) + ' ' + localTime(e.at) + ' - ' + e.event.replace(/_/g, ' ') }); })));
