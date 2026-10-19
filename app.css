@@ -101,6 +101,11 @@ main { padding: 18px 22px 60px; max-width: 1320px; margin: 0 auto; }
 .btn.loading::after { content: ""; display: inline-block; width: 14px; height: 14px; margin-left: 10px; vertical-align: -2px; border: 2px solid #fff8; border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .login-status { min-height: 1.4em; margin: 8px 0 0; }
+.wide-card { grid-column: 1 / -1; }
+.rankings { display: grid; gap: 16px; margin: 16px 0; }
+.rankcard.brand-RGOS { border-top: 6px solid var(--rgos-ac); } .rankcard.brand-RGAB { border-top: 6px solid var(--rgab-ac); }
+.rankcard td.rank { font-weight: 800; font-size: 15px; white-space: nowrap; }
+.rankcard tr.top1 { background: color-mix(in srgb, #f5c542 14%, transparent); } .rankcard tr.top2 { background: color-mix(in srgb, #9aa5b1 11%, transparent); } .rankcard tr.top3 { background: color-mix(in srgb, #cd7f32 11%, transparent); }
 .toolbar-group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .funnel-row { display: grid; grid-template-columns: 170px 1fr 44px; gap: 10px; align-items: center; margin: 9px 0; font-size: 13.5px; }
 .funnel-row .fl { color: var(--muted); font-weight: 600; } .funnel-row .fn { text-align: right; font-weight: 800; }

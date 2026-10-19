@@ -92,10 +92,10 @@
       return j.items;
     });
   }
-  function loadCalendar() {
+  function loadCalendar(force) {
     if (state.tab !== 'calendar') return Promise.resolve();
     var r = rangeFor(); var key = isoStart(r[0]) + '|' + isoStart(r[1]); var hit = calLookup(r);
-    if (hit && hit.exact && Date.now() - hit.at < 20000) return Promise.resolve();       // fresh enough: nothing to fetch
+    if (!force && hit && hit.exact && Date.now() - hit.at < 20000) return Promise.resolve();       // fresh enough: nothing to fetch
     return calFetch(r).then(function () {
       var now = rangeFor(); if (isoStart(now[0]) + '|' + isoStart(now[1]) === key && state.tab === 'calendar') { state.items = (calLookup(r) || { items: [] }).items; state.error = null; state.calLoading = false; }
       setTimeout(prefetchCalendar, 400);
@@ -300,6 +300,7 @@
 
   // ------------------------------------------------------------ results sent: what happened to every released assessment result
   // The core knows when a result was released; e-mail delivery, opening and the client's answer are reported by the owning company.
+  var RANKS = [['released', 'Most results sent'], ['accepted', 'Most accepted'], ['rate', 'Highest acceptance rate'], ['rejlow', 'Lowest rejection rate'], ['fast', 'Fastest answer'], ['fewignored', 'Fewest ignored']];
   var RES_STATE = {
     accepted: ['Accepted', 'ok'], rejected: ['Rejected', 'bad'], ignored: ['Ignored', 'warn'], opened: ['Opened', ''], delivered: ['Delivered', ''], sent: ['Sent', ''],
     bounced: ['Not delivered', 'bad'], waiting_for_company: ['Waiting for company report', 'warn']
@@ -354,17 +355,43 @@
       h('table', null, h('thead', null, h('tr', null, ['Company', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Ignored', 'Not delivered', 'Waiting'].map(function (x) { return h('th', { text: x }); }))),
         h('tbody', null, ['RGOS', 'RGAB'].filter(function (co) { return !state.company || state.company === co; }).map(function (co) { return h('tr', null, cell(co).map(function (x, i) { return h('td', { text: String(x), class: i === 0 ? 'co ' + co : '' }); })); }))));
     function rate(a, b) { return b > 0 ? Math.round(1000 * a / b) / 10 + '%' : 'N/A'; }
-    var advRows = (r.by_advisor || []).map(function (a) {
-      var decided = a.accepted + a.rejected;
-      return h('tr', null, h('td', { text: a.advisor_name || ('Advisor ' + String(a.advisor_ref).slice(0, 8)) }), h('td', null, h('span', { class: 'co ' + a.company, text: a.company })),
-        [a.released, a.delivered, a.opened, a.accepted, a.rejected, a.released - decided - a.bounced - a.waiting_for_company - a.ignored, a.ignored].map(function (x) { return h('td', { text: String(x) }); }),
-        h('td', { text: rate(a.delivered, a.released) }), h('td', { text: rate(a.accepted, decided) + (decided ? ' (of ' + decided + ')' : '') }), h('td', { text: rate(a.rejected, decided) }),
-        h('td', { text: a.avg_answer_hours === null || a.avg_answer_hours === undefined ? 'N/A' : a.avg_answer_hours + ' h' }));
-    });
-    var advisors = h('div', { class: 'card scroll-x' }, h('h2', { text: 'By advisor / counselor' }),
-      h('p', { class: 'note', text: 'Acceptance and rejection rate = accepted (or rejected) divided by the results the client has answered; the number it is based on is shown. N/A means there is nothing to divide by yet. Answer time = from sending to the client answer.' }),
-      advRows.length ? h('table', null, h('thead', null, h('tr', null, ['Advisor', 'Company', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Pending', 'Ignored', 'Delivery rate', 'Acceptance rate', 'Rejection rate', 'Avg answer time'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, advRows))
-        : h('p', { class: 'note', text: 'No results were sent in this period.' }));
+    // Ranking per company (each company has its own card, so a screenshot of one never shows the other). Rate-based rankings only count people with at least MIN answered results / sent results.
+    var MIN = 5; var by = state.rankBy || 'released';
+    function pv(x) { // [eligible, value where bigger is better]
+      var a = x.a; var dec = a.accepted + a.rejected;
+      if (by === 'released') return [true, a.released];
+      if (by === 'accepted') return [true, a.accepted];
+      if (by === 'rate') return [dec >= MIN, dec ? a.accepted / dec : 0];
+      if (by === 'rejlow') return [dec >= MIN, dec ? -(a.rejected / dec) : 0];
+      if (by === 'fast') return [dec >= MIN && a.avg_answer_hours !== null && a.avg_answer_hours !== undefined, -(a.avg_answer_hours || 0)];
+      return [a.released >= MIN, -a.ignored];   // fewest ignored
+    }
+    function rankingCard(co) {
+      var list = (r.by_advisor || []).filter(function (a) { return a.company === co; }).map(function (a) { return { a: a, dec: a.accepted + a.rejected }; });
+      list.forEach(function (x) { var p = pv(x); x.ok = p[0]; x.v = p[1]; });
+      list.sort(function (p, q) { return (q.ok - p.ok) || (q.v - p.v) || (q.a.released - p.a.released) || (q.a.accepted - p.a.accepted); });
+      var rank = 0, prev = null, pos = 0;
+      list.forEach(function (x) { pos += 1; if (!x.ok) { x.rank = null; return; } if (prev === null || x.v !== prev) rank = pos; prev = x.v; x.rank = rank; });
+      var rows = list.map(function (x) {
+        var a = x.a; var decided = x.dec; var medal = x.rank === 1 ? ' \u{1F947}' : x.rank === 2 ? ' \u{1F948}' : x.rank === 3 ? ' \u{1F949}' : '';
+        var nums = [a.released, a.delivered, a.opened, a.accepted, a.rejected, a.released - decided - a.bounced - a.waiting_for_company - a.ignored, a.ignored];
+        return h('tr', { class: x.rank && x.rank <= 3 ? 'top' + x.rank : '' },
+          h('td', { class: 'rank', text: x.rank ? x.rank + medal : '-', title: x.rank ? '' : 'Not ranked: fewer than ' + MIN + ' results for this ranking' }),
+          h('td', { text: a.advisor_name || ('Staff ' + String(a.advisor_ref).slice(0, 8)) }),
+          nums.map(function (n) { return h('td', { text: String(n) }); }),
+          h('td', { text: rate(a.delivered, a.released) }), h('td', { text: rate(a.accepted, decided) + (decided ? ' (of ' + decided + ')' : '') }), h('td', { text: rate(a.rejected, decided) }),
+          h('td', { text: a.avg_answer_hours === null || a.avg_answer_hours === undefined ? 'N/A' : a.avg_answer_hours + ' h' }));
+      });
+      var what = co === 'RGAB' ? 'counselor' : 'advisor'; var basis = (RANKS.filter(function (o) { return o[0] === by; })[0] || RANKS[0])[1];
+      return h('div', { class: 'card scroll-x rankcard brand-' + co },
+        h('h2', null, companyBadge(co), ' ' + co + ' - ' + what + ' ranking'),
+        h('p', { class: 'note', text: 'Ranked by: ' + basis + '. Period: ' + resRange()[0] + ' to ' + addDays(resRange()[1], -1) + ' (Dubai). Rates use the answered results shown in brackets; "-" = not ranked (fewer than ' + MIN + ' for this ranking).' }),
+        rows.length ? h('table', null, h('thead', null, h('tr', null, ['#', co === 'RGAB' ? 'Counselor' : 'Advisor', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Pending', 'Ignored', 'Delivery rate', 'Acceptance rate', 'Rejection rate', 'Avg answer time'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
+          : h('p', { class: 'note', text: 'No results were sent in this period.' }));
+    }
+    var rankSel = h('select', { id: 'rank-by', 'aria-label': 'Rank by', onchange: function (e) { state.rankBy = e.target.value; renderMain(); } }, RANKS.map(function (o) { return h('option', { value: o[0], text: 'Rank by: ' + o[1], selected: by === o[0] }); }));
+    var cos = ['RGOS', 'RGAB'].filter(function (co) { return !state.company || state.company === co; });
+    var advisors = h('div', { class: 'rankings' }, h('div', { class: 'toolbar' }, h('strong', { text: 'Ranking of advisors and counselors (a separate card for each company)' }), rankSel), cos.map(rankingCard));
     var rows = r.items.map(function (i) {
       var st = RES_STATE[i.state] || [i.state, '']; var ev = i.events || {};
       var when = function (k) { return ev[k] ? localDate(ev[k]) + ' ' + localTime(ev[k]) : '-'; };
@@ -453,12 +480,18 @@
           api('POST', '/ui/api/extra-availability', { company: comp.value, start: s.value + ':00+04:00', end: e.value + ':00+04:00', reason: r.value }).then(refreshTab).catch(function (x) { msg.textContent = x.message; });
         } }), msg) : h('p', { class: 'note', text: 'Read-only for your role.' }));
   }
+  function daysLabel(ws) {   // 0 = Sunday ... 6 = Saturday; shown Monday first, as a range when the days run on
+    var o = (ws || []).map(function (d) { return (d + 6) % 7; }).sort(function (x, y) { return x - y; }); if (!o.length) return '-';
+    var names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; if (o.length === 7) return 'Every day';
+    var run = o.every(function (v, i) { return i === 0 || v === o[i - 1] + 1; });
+    return run && o.length > 2 ? names[o[0]] + ' - ' + names[o[o.length - 1]] : o.map(function (v) { return names[v]; }).join(', ');
+  }
   function profilesCard() {
     var p = (state.tabData.profiles || {}).items || [];
-    return h('div', { class: 'card' }, h('h2', { text: 'Company booking hours (per-company configuration)' }),
+    return h('div', { class: 'card wide-card' }, h('h2', { text: 'Company booking hours' }),
       h('table', null, h('thead', null, h('tr', null, ['Company', 'Slot', 'First start', 'Last start', 'Company break', 'Days'].map(function (x) { return h('th', { text: x }); }))),
-        h('tbody', null, p.map(function (c) { return h('tr', null, h('td', null, companyBadge(c.company)), h('td', { text: c.slot_minutes + ' min' }), h('td', { text: c.first_start }), h('td', { text: c.last_start }), h('td', { text: c.break_start ? c.break_start + '-' + c.break_end : 'none' }), h('td', { text: c.weekdays.map(function (d) { return DOW[d]; }).join(' ') })); }))),
-      h('p', { class: 'note', text: 'Development seed values. Each company supplies its own hours; the core never assumes shared hours.' }));
+        h('tbody', null, p.map(function (c) { return h('tr', null, h('td', null, companyBadge(c.company)), h('td', { text: c.slot_minutes + ' min' }), h('td', { text: c.first_start }), h('td', { text: c.last_start }), h('td', { text: c.break_start ? c.break_start + ' - ' + c.break_end : 'none' }), h('td', { text: daysLabel(c.weekdays) })); }))),
+      h('p', { class: 'note', text: window.PIC_ENV === 'live' ? 'Each company supplies its own hours. Interviews can only be booked inside them.' : 'Development seed values. Each company supplies its own hours; the core never assumes shared hours.' }));
   }
 
   // ------------------------------------------------------------ management
@@ -485,8 +518,21 @@
     var report = h('div', { class: 'card' }, h('h2', { text: 'Management report (last 30 days to next 60 days)' }),
       rep.length ? h('table', null, h('thead', null, h('tr', null, ['Company', 'Interview', 'Assessment', 'Count'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rep.map(function (r) { return h('tr', null, h('td', null, companyBadge(r.company)), h('td', { text: statusLabel(r.status) }), h('td', { text: ASSESS[r.assessment_status] }), h('td', { text: String(r.count) })); }))) : h('p', { class: 'note', text: 'No data.' }));
     var aud = (d.audit || { items: [] }).items;
-    var audit = h('div', { class: 'card' }, h('h2', { text: 'Audit history' }), aud.length ? h('table', null, h('thead', null, h('tr', null, ['When', 'Actor', 'Action', 'Target'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, aud.slice(0, 40).map(function (a) {
-      return h('tr', null, h('td', { text: localDate(a.at) + ' ' + localTime(a.at) }), h('td', { text: String(a.actor).slice(0, 8) }), h('td', { text: a.action }), h('td', { text: a.target ? String(a.target).slice(0, 8) : '' }));
+    var AUDIT_LABEL = { login: 'Signed in', login_failed: 'Sign-in refused (wrong password or code)', logout: 'Signed out', release_requested: 'Result release requested', interview_action: 'Interview action',
+      result_history_import: 'Company loaded earlier results', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
+      link_requested: 'Account link requested', link_approved: 'Account link approved', link_revoked: 'Account link removed', incident_reviewed: 'Incident reviewed' };
+    function auditWhat(a) { return AUDIT_LABEL[a.action] || (a.action.charAt(0).toUpperCase() + a.action.slice(1).replace(/_/g, ' ')); }
+    function auditDetail(a) {
+      var x = a.detail || {}; var out = [];
+      if (x.via) out.push('with the ' + x.via + ' account');
+      if (typeof x.inserted === 'number') out.push(x.inserted + ' new, ' + x.updated + ' corrected' + (x.company ? ' (' + x.company + ')' : ''));
+      if (x.action) out.push(String(x.action).replace(/_/g, ' '));
+      if (x.locked) out.push('account locked');
+      if (x.reason) out.push('reason: ' + x.reason);
+      return out.join('; ');
+    }
+    var audit = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Audit history' }), aud.length ? h('table', null, h('thead', null, h('tr', null, ['When', 'Who', 'What happened', 'Details'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, aud.slice(0, 40).map(function (a) {
+      return h('tr', null, h('td', { text: localDate(a.at) + ' ' + localTime(a.at) }), h('td', { text: a.actor_name || 'Unknown' }), h('td', { text: auditWhat(a) }), h('td', { text: [auditDetail(a), a.target ? 'ref ' + String(a.target).slice(0, 8) : ''].filter(Boolean).join(' - ') }));
     }))) : h('p', { class: 'note', text: 'Nothing recorded yet.' }));
     return h('div', null, controls, h('div', { class: 'grid2' }, incidents, report), audit);
   }
@@ -689,10 +735,11 @@
     if (!state.user) { root.appendChild(loginView()); return; }
     root.appendChild(mainShell()); renderMain();
   }
-  function refreshTab() {
-    var t = state.tab; var jobs = [];
+  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report]); }
+  function refreshTab(quiet) {
+    var before = quiet ? snap() : null; var t = state.tab; var jobs = [];
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
-    if (t === 'calendar') { jobs.push(loadCalendar()); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
+    if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
     if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (rq === resKey()) state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
@@ -703,7 +750,7 @@
       jobs.push(api('GET', '/ui/api/audit').then(function (a) { state.tabData.audit = a; }).catch(function () { state.tabData.audit = { items: [] }; }));
       jobs.push(api('GET', '/ui/api/report?from=' + rng).then(function (r) { state.tabData.report = r; }).catch(function () {}));
     }
-    return Promise.all(jobs).then(renderMain);
+    return Promise.all(jobs).then(function () { if (quiet && snap() === before) return; renderMain(); });
   }
   function refreshAll() { return loadControls().then(function () { return refreshTab(); }).then(function () { var shell = document.querySelector('.banner'); if (state.user) { var scroll = window.scrollY; root.textContent = ''; root.appendChild(mainShell()); renderMain(); window.scrollTo(0, scroll); } }); }
   function refresh() {
@@ -727,5 +774,12 @@
     if (k === 'Escape' && state.drawer) { state.drawer = null; renderMain(); }
   });
   init();
-  setInterval(function () { if (state.user && !state.drawer && document.visibilityState === 'visible' && !document.body.classList.contains('touring') && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) refreshAll().catch(function () {}); }, 15000);
+  // Background refresh every 15 s: only on the data screens, never under a video or a form, and only redraws when something really changed (so a playing tutorial is never restarted).
+  setInterval(function () {
+    if (!state.user || state.drawer || document.visibilityState !== 'visible' || document.body.classList.contains('touring')) return;
+    if (['calendar', 'queues', 'results', 'management'].indexOf(state.tab) < 0) return;
+    if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    var before = JSON.stringify(state.controls);
+    loadControls().then(function () { if (JSON.stringify(state.controls) !== before) return refreshAll(); return refreshTab(true); }).catch(function () {});
+  }, 15000);
 })();
