@@ -636,6 +636,8 @@
       if (dr.grading && (action === 'save_draft' || action === 'submit')) {
         var gv = {}; var bad = null; dr.grading.criteria.forEach(function (c) { var v = dr.grades[c.id]; if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > c.max) bad = c; else gv[c.id] = v; });
         if (bad) { msg.className = 'err'; msg.textContent = 'Enter a number from 0 to ' + bad.max + ' for ' + bad.label + '.'; return Promise.resolve(); }
+        var need = action === 'submit' ? (dr.grading.submit_note_min_length || 0) : 0;
+        if (need && (!dr.note || dr.note.trim().length < need)) { msg.className = 'err'; msg.textContent = 'Write a note of at least ' + need + ' characters before you submit.'; return Promise.resolve(); }
         payload.grades = gv; if (dr.note && dr.note.trim()) payload.note = dr.note.trim();
       }
       return api('POST', '/ui/api/booking/' + b.id + '/action', payload).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) {
@@ -651,7 +653,7 @@
       var gsum = function () { var t = 0; gcrit.forEach(function (c) { var v = dr.grades[c.id]; if (typeof v === 'number' && isFinite(v)) t += v; }); gtotal.textContent = t + ' / ' + gmax + (dr.grading.pass_mark ? ' (pass mark ' + dr.grading.pass_mark + ')' : ''); };
       box.appendChild(h('div', { class: 'card gradecard' }, h('h3', { text: 'Assessment grades' }),
         gcrit.map(function (c) { return h('div', { class: 'field' }, h('label', { for: 'gr-' + c.id, text: c.label + ' (0 to ' + c.max + ')' }), h('input', { type: 'number', id: 'gr-' + c.id, min: '0', max: String(c.max), step: '1', value: typeof dr.grades[c.id] === 'number' ? String(dr.grades[c.id]) : '', oninput: function (e) { dr.grades[c.id] = e.target.value === '' ? undefined : Number(e.target.value); gsum(); } })); }),
-        h('div', { class: 'field' }, h('label', { for: 'gr-note', text: 'Note (optional)' }), h('textarea', { id: 'gr-note', rows: '3', maxlength: '2000', oninput: function (e) { dr.note = e.target.value; } }, dr.note || '')),
+        h('div', { class: 'field' }, h('label', { for: 'gr-note', text: dr.grading.submit_note_min_length ? 'Note (required to submit, at least ' + dr.grading.submit_note_min_length + ' characters)' : 'Note (optional)' }), h('textarea', { id: 'gr-note', rows: '3', maxlength: '2000', oninput: function (e) { dr.note = e.target.value; } }, dr.note || '')),
         h('p', null, 'Total: ', gtotal), h('p', { class: 'note', text: 'Save the draft, then submit. The company checks the grades with its own rules.' })));
       gsum();
     }
