@@ -184,6 +184,19 @@
       onclick: function () { if (cls === 's-ATT') { state.tab = 'queues'; refresh(); return; } state.company = company; refresh(); } }, h('span', { class: 'num', text: String(num) }), h('span', { class: 'lbl', text: lbl })); }
     return h('div', { class: 'stats' }, tile('s-ALL', items.length, 'Interviews ' + scope, '', 'Show both companies'), tile('s-RGOS', by('RGOS'), 'RGOS', 'RGOS', 'Show RGOS only'), tile('s-RGAB', by('RGAB'), 'RGAB', 'RGAB', 'Show RGAB only'), tile('s-ATT', attention, 'Need your attention', '', 'Open the queues'));
   }
+  // Tutorials: narrated videos, one per menu, listed in the left menu's last entry. Files live next to the page in videos/ (manifest.json lists them).
+  function tutorialsTab() {
+    var m = state.tabData.videos; var list = (m && m.chapters) || [];
+    if (!list.length) return h('div', { class: 'card' }, h('h2', { text: 'Tutorials' }), h('p', { class: 'note', text: 'The tutorial videos are being prepared and will appear here.' }));
+    var cur = state.tutorial && list.filter(function (c) { return c.id === state.tutorial; })[0] || list[0];
+    var player = h('video', { class: 'player', controls: true, preload: 'metadata', src: 'videos/' + cur.file, 'aria-label': cur.title });
+    if (cur.poster) player.setAttribute('poster', 'videos/' + cur.poster);
+    var steps = list.map(function (c) {
+      return h('button', { class: 'chap' + (c.id === cur.id ? ' on' : ''), type: 'button', 'data-chapter': c.id, onclick: function () { state.tutorial = c.id; state.fx = true; renderMain(); } },
+        h('span', { class: 'chap-n', text: String(list.indexOf(c) + 1) }), h('span', { class: 'chap-t' }, h('strong', { text: c.title }), h('span', { class: 'note', text: (c.minutes ? c.minutes + ' min - ' : '') + (c.summary || '') })));
+    });
+    return h('div', { class: 'tutorials' }, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, h('p', { class: 'note', text: cur.summary || '' })), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
+  }
   function shiftMonth(n) { var d = new Date(state.date + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n, 1); return d.toISOString().slice(0, 10); }
   function breakMarks(ds) {
     var out = [];
@@ -458,20 +471,31 @@
   }
 
   // ------------------------------------------------------------ shell
+  // Sign in: the person's company login (email + password go straight to that company's own login service) or the Command Center's own login name; both need the one-time code.
   function loginView() {
+    var methods = [['local', 'Login name']].concat(Object.keys(window.PIC_SSO || {}).map(function (c) { return [c, (window.PIC_SSO[c].label || c) + ' account']; }));
+    var method = state.loginMethod && methods.some(function (m) { return m[0] === state.loginMethod; }) ? state.loginMethod : (methods.length > 1 ? methods[1][0] : 'local');
     var err = h('p', { class: 'err', id: 'login-err', role: 'alert' });
     var email = h('input', { type: 'email', id: 'email', autocomplete: 'username', required: true }); var pw = h('input', { type: 'password', id: 'password', autocomplete: 'current-password', required: true });
     var totp = h('input', { type: 'text', id: 'totp', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '6', required: true });
+    function fail(e) { pw.value = ''; totp.value = ''; err.textContent = e && e.status === 429 ? 'Too many attempts. Try again later.' : 'Sign-in failed. Check your details and code.'; }
     var form = h('form', { class: 'login', onsubmit: function (ev) {
       ev.preventDefault(); err.textContent = '';
-      api('POST', '/ui/api/login', { email: email.value, password: pw.value, totp: totp.value }).then(function () { return init(); }).catch(function (e) { pw.value = ''; totp.value = ''; err.textContent = e.status === 429 ? 'Too many attempts. Try again later.' : 'Sign-in failed. Check your details and code.'; });
+      if (method === 'local') { api('POST', '/ui/api/login', { email: email.value, password: pw.value, totp: totp.value }).then(function () { return init(); }).catch(fail); return; }
+      var cfg = window.PIC_SSO[method];
+      // password goes only to the company's own login service, never to this application's server
+      fetch(cfg.url + '/auth/v1/token?grant_type=password', { method: 'POST', headers: { apikey: cfg.key, 'content-type': 'application/json' }, body: JSON.stringify({ email: email.value.trim(), password: pw.value }) })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject({ status: r.status }); })
+        .then(function (j) { pw.value = ''; return api('POST', '/ui/api/login-sso', { company: method, token: j.access_token, totp: totp.value }); })
+        .then(function () { return init(); }).catch(fail);
     } }, h('h1', { text: 'Facilitator Command Center' }), h('p', { text: 'Private. Authorised facilitator and management only.' }),
-      h('div', { class: 'field' }, h('label', { for: 'email', text: 'E-mail' }), email), h('div', { class: 'field' }, h('label', { for: 'password', text: 'Password' }), pw),
+      methods.length > 1 ? h('div', { class: 'seg login-methods', role: 'group', 'aria-label': 'Sign in with' }, methods.map(function (m) { return h('button', { type: 'button', 'aria-pressed': String(method === m[0]), text: m[1], onclick: function () { state.loginMethod = m[0]; render(); } }); })) : null,
+      h('div', { class: 'field' }, h('label', { for: 'email', text: method === 'local' ? 'Login name' : 'E-mail (your ' + ((window.PIC_SSO[method] || {}).label || method) + ' login)' }), email), h('div', { class: 'field' }, h('label', { for: 'password', text: 'Password' }), pw),
       h('div', { class: 'field' }, h('label', { for: 'totp', text: 'Authenticator code' }), totp), h('button', { class: 'btn', type: 'submit', text: 'Sign in' }), err,
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
   }
-  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management']];
+  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   function mainShell() {
     var u = state.user; var frozen = state.controls && (state.controls.bookings_enabled === false || state.controls.releases_enabled === false);
@@ -488,7 +512,7 @@
   function renderMain() {
     var m = document.getElementById('main'); if (!m) return;
     m.textContent = '';
-    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : managementTab();
+    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     m.appendChild(body); var d = drawerEl(); if (d) m.appendChild(d);
     document.querySelectorAll('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === state.tab)); });
@@ -504,6 +528,7 @@
     if (t === 'calendar') { jobs.push(loadCalendar()); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
+    if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
     if (t === 'management') {
       jobs.push(api('GET', '/ui/api/incidents').then(function (i) { state.tabData.incidents = i; }).catch(function () {}));

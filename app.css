@@ -222,3 +222,24 @@ dialog::backdrop { background: #070b1699; backdrop-filter: blur(3px); }
   @keyframes numpop { from { transform: scale(.7); opacity: 0; } }
 }
 .tabs button { position: relative; }
+
+/* ------------------------------------------------------------ left menu (wide screens) and tutorials */
+@media (min-width: 960px) {
+  nav.tabs { position: fixed; left: 0; top: 69px; bottom: 0; width: 232px; flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 18px 14px; margin: 0; max-width: none; overflow-y: auto;
+    background: color-mix(in srgb, var(--panel) 70%, transparent); backdrop-filter: blur(14px); border-right: 1px solid var(--line); z-index: 4; }
+  nav.tabs button { text-align: left; border-radius: 12px; padding: 11px 14px; width: 100%; }
+  nav.tabs button[aria-selected="true"]::after { left: 0; right: auto; top: 10px; bottom: 10px; width: 4px; height: auto; }
+  nav.tabs button[data-tab="tutorials"] { margin-top: auto; border: 1px dashed var(--line); }
+  main { margin-left: 232px; max-width: none; padding-left: 28px; padding-right: 28px; }
+  body:has(.synth) nav.tabs { top: 102px; }
+}
+.tutorials { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .tutorials { grid-template-columns: 1fr; } }
+.player { width: 100%; border-radius: 14px; background: #000; max-height: 62vh; }
+.chap { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 8px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel2); cursor: pointer; }
+.chap.on { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+.chap-n { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: var(--brand-fg); background: linear-gradient(135deg, var(--brand), var(--brand2)); }
+.chap-t { display: grid; gap: 2px; }
+@media (prefers-reduced-motion: no-preference) { .chap { transition: transform .15s, box-shadow .15s, border-color .15s; } .chap:hover { transform: translateX(3px); } }
+
+.login-methods { display: flex; margin: 0 0 14px; } .login-methods button { flex: 1; font-size: 13px; }
