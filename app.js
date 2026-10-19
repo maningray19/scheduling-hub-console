@@ -563,7 +563,7 @@
       rep.length ? h('table', null, h('thead', null, h('tr', null, ['Company', 'Interview', 'Assessment', 'Count'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rep.map(function (r) { return h('tr', null, h('td', null, companyBadge(r.company)), h('td', { text: statusLabel(r.status) }), h('td', { text: ASSESS[r.assessment_status] }), h('td', { text: String(r.count) })); }))) : h('p', { class: 'note', text: 'No data.' }));
     var aud = (d.audit || { items: [] }).items;
     var AUDIT_LABEL = { login: 'Signed in', login_failed: 'Sign-in refused (wrong password or code)', logout: 'Signed out', release_requested: 'Result release requested', interview_action: 'Interview action',
-      result_history_import: 'Company loaded earlier results', export: 'Downloaded a report', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
+      result_history_import: 'Company loaded earlier results', export: 'Downloaded a report', document_list: 'Looked at the list of client documents', document_view: 'Opened a client document', document_download: 'Downloaded a client document', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
       link_requested: 'Account link requested', link_approved: 'Account link approved', link_revoked: 'Account link removed', incident_reviewed: 'Incident reviewed' };
     function auditWhat(a) { return AUDIT_LABEL[a.action] || (a.action.charAt(0).toUpperCase() + a.action.slice(1).replace(/_/g, ' ')); }
     function auditDetail(a) {
@@ -703,7 +703,7 @@
     var grid = h('div', { class: 'docgrid' }, h('p', { class: 'note', text: 'Loading documents...' })); var urls = [];
     var dlg = h('dialog', { id: 'docs-dialog', class: 'docs-dialog' },
       h('div', { class: 'docs-head' }, h('h3', { text: 'Uploaded documents - ' + (((b.details || {}).client_name) || b.company) }), h('button', { class: 'btn secondary', type: 'button', id: 'docs-close', text: 'Close', onclick: function () { dlg.close(); } })),
-      h('p', { class: 'note', text: 'Shown live from ' + b.company + '. Nothing is saved in the Command Center, and every view is recorded in the audit history.' }), grid);
+      h('p', { class: 'note', text: 'Shown live from ' + b.company + '. Nothing is saved in the Command Center, and every view and every download is recorded in the audit history.' }), grid);
     dlg.addEventListener('close', function () { urls.forEach(function (u) { URL.revokeObjectURL(u); }); dlg.remove(); });
     document.body.appendChild(dlg); dlg.showModal();
     api('GET', '/ui/api/booking/' + b.id + '/documents').then(function (l) {
@@ -716,6 +716,11 @@
           var bin = atob(f.data_base64); var arr = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
           var u = URL.createObjectURL(new Blob([arr], { type: f.mime })); urls.push(u); body.textContent = '';
           body.appendChild(f.mime === 'application/pdf' ? h('iframe', { class: 'docframe', src: u, title: d.label }) : h('img', { class: 'docimg', src: u, alt: d.label }));
+          var ext = ({ 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg' })[f.mime] || 'bin';
+          body.appendChild(h('div', { class: 'docactions' }, h('button', { class: 'btn secondary', type: 'button', text: 'Download', onclick: function (e) {
+            var btn = e.target; btn.disabled = true;
+            api('POST', '/ui/api/booking/' + b.id + '/documents/' + encodeURIComponent(d.id) + '/download', {}).then(function () { var a = document.createElement('a'); a.href = u; a.download = (d.kind || 'document').replace(/[^A-Za-z0-9_-]/g, '') + '.' + ext; document.body.appendChild(a); a.click(); a.remove(); toast('Download recorded and started'); }).catch(function () { toast('The download could not be recorded, so it was not made. Try again.'); }).then(function () { btn.disabled = false; });
+          } })));
         }).catch(function () { body.textContent = ''; body.appendChild(h('p', { class: 'err', text: 'This document could not be opened.' })); });
       });
     }).catch(function (e) {
