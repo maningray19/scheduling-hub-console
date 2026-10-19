@@ -660,7 +660,8 @@
       var done = b.status === 'completed'; var sched = b.status === 'confirmed';
       box.appendChild(h('div', { class: 'actions' },
         act('Mark interview completed', 'complete_interview', sched), act('Mark no-show', 'mark_no_show', sched),
-        act('Save assessment draft', 'save_draft', done && b.assessment_status === 'none'), act('Submit assessment', 'submit', done && b.assessment_status === 'draft'),
+        (dr.grading && dr.grading.supports_draft === false) ? null : act('Save assessment draft', 'save_draft', done && b.assessment_status === 'none'),
+        act('Submit assessment', 'submit', done && (b.assessment_status === 'draft' || (dr.grading && dr.grading.supports_draft === false && b.assessment_status === 'none'))),
         act('Send to advisor for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
         h('button', { class: 'btn', type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), onclick: function () { confirmRelease(b, msg); } })));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
