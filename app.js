@@ -455,6 +455,29 @@
     return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
   }
 
+  // ------------------------------------------------------------ notices (the owner writes, the facilitator reads and presses "Got it")
+  function loadNotices() { return api('GET', '/ui/api/notices').then(function (r) { state.notices = r.items; }).catch(function () {}); }
+  function noticesBar() {
+    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked; }); if (!open.length) return null;
+    return h('div', { class: 'notices' }, open.map(function (n) {
+      return h('div', { class: 'notice', role: 'alert' }, h('strong', { class: 'notice-t', text: n.title }), h('p', { class: 'notice-b', text: n.body }),
+        h('div', { class: 'notice-f' }, h('span', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) }),
+          h('button', { class: 'btn', type: 'button', text: 'Got it', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', {}).then(function () { n.acked = true; renderMain(); return loadNotices(); }).then(renderMain).catch(function () { e.target.disabled = false; }); } })));
+    }));
+  }
+  function noticesCard() {
+    var list = (state.tabData.noticesAll || { items: [] }).items; var msg = h('p', { class: 'err', id: 'noticemsg' });
+    var title = h('input', { type: 'text', id: 'nt-title', maxlength: '140', placeholder: 'Title', 'aria-label': 'Notice title' });
+    var body = h('textarea', { id: 'nt-body', rows: '4', maxlength: '4000', placeholder: 'What the facilitator should know or do', 'aria-label': 'Notice text' });
+    var aud = h('select', { id: 'nt-aud', 'aria-label': 'Who sees it' }, [['facilitator', 'The facilitator (Aira) and owners'], ['all', 'Everyone who signs in']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+    return h('div', { class: 'card' }, h('h2', { text: 'Notices' }), h('p', { class: 'note', text: 'A notice shows at the top of the Command Center until the person presses "Got it". It is recorded who saw it and when.' }),
+      h('div', { class: 'field' }, h('label', { text: 'Title' }), title), h('div', { class: 'field' }, h('label', { text: 'Text' }), body), h('div', { class: 'field' }, h('label', { text: 'Show to' }), aud),
+      h('button', { class: 'btn', type: 'button', text: 'Post notice', onclick: function () { api('POST', '/ui/api/notices', { title: title.value, body: body.value, audience: aud.value }).then(function () { title.value = ''; body.value = ''; return refreshTab(); }).catch(function (x) { msg.textContent = x.message; }); } }), msg,
+      list.length ? h('table', null, h('thead', null, h('tr', null, ['Posted', 'Title', 'Seen by', ''].map(function (x) { return h('th', { text: x }); }))),
+        h('tbody', null, list.map(function (n) { var seen = (n.acked_by || []).map(function (a) { return a.name + ' ' + localDate(a.at) + ' ' + localTime(a.at); }).join('; ');
+          return h('tr', null, h('td', { text: localDate(n.created_at) + ' ' + localTime(n.created_at) }), h('td', { text: n.title + (n.active ? '' : ' (removed)') }), h('td', { text: seen || 'Not seen yet' }),
+            h('td', null, n.active ? h('button', { class: 'btn secondary', type: 'button', text: 'Remove', onclick: function () { api('DELETE', '/ui/api/notices/' + n.id).then(refreshTab); } }) : null)); }))) : h('p', { class: 'note', text: 'No notices yet.' }));
+  }
   // ------------------------------------------------------------ availability
   function availabilityTab() {
     var a = state.tabData.avail || { unavailability: [], recurring: [] };
@@ -563,7 +586,7 @@
       rep.length ? h('table', null, h('thead', null, h('tr', null, ['Company', 'Interview', 'Assessment', 'Count'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rep.map(function (r) { return h('tr', null, h('td', null, companyBadge(r.company)), h('td', { text: statusLabel(r.status) }), h('td', { text: ASSESS[r.assessment_status] }), h('td', { text: String(r.count) })); }))) : h('p', { class: 'note', text: 'No data.' }));
     var aud = (d.audit || { items: [] }).items;
     var AUDIT_LABEL = { login: 'Signed in', login_failed: 'Sign-in refused (wrong password or code)', logout: 'Signed out', release_requested: 'Result release requested', interview_action: 'Interview action',
-      result_history_import: 'Company loaded earlier results', export: 'Downloaded a report', document_list: 'Looked at the list of client documents', document_view: 'Opened a client document', document_download: 'Downloaded a client document', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
+      result_history_import: 'Company loaded earlier results', notice_posted: 'Posted a notice', notice_acknowledged: 'Pressed "Got it" on a notice', notice_removed: 'Removed a notice', export: 'Downloaded a report', document_list: 'Looked at the list of client documents', document_view: 'Opened a client document', document_download: 'Downloaded a client document', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
       link_requested: 'Account link requested', link_approved: 'Account link approved', link_revoked: 'Account link removed', incident_reviewed: 'Incident reviewed' };
     function auditWhat(a) { return AUDIT_LABEL[a.action] || (a.action.charAt(0).toUpperCase() + a.action.slice(1).replace(/_/g, ' ')); }
     function auditDetail(a) {
@@ -578,7 +601,7 @@
     var audit = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Audit history' }), aud.length ? h('table', null, h('thead', null, h('tr', null, ['When', 'Who', 'What happened', 'Details'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, aud.slice(0, 40).map(function (a) {
       return h('tr', null, h('td', { text: localDate(a.at) + ' ' + localTime(a.at) }), h('td', { text: a.actor_name || 'Unknown' }), h('td', { text: auditWhat(a) }), h('td', { text: [auditDetail(a), a.target ? 'ref ' + String(a.target).slice(0, 8) : ''].filter(Boolean).join(' - ') }));
     }))) : h('p', { class: 'note', text: 'Nothing recorded yet.' }));
-    return h('div', null, controls, h('div', { class: 'grid2' }, incidents, report), audit);
+    return h('div', null, controls, h('div', { class: 'grid2' }, incidents, report), noticesCard(), audit);
   }
 
   function linksTab() {
@@ -829,6 +852,7 @@
     m.textContent = '';
     var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
+    var nb = noticesBar(); if (nb) m.appendChild(nb);
     m.appendChild(body); var d = drawerEl(); if (d) m.appendChild(d);
     document.querySelectorAll('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === state.tab)); });
   }
@@ -837,9 +861,9 @@
     if (!state.user) { root.appendChild(loginView()); return; }
     root.appendChild(mainShell()); renderMain();
   }
-  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report]); }
+  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll]); }
   function refreshTab(quiet) {
-    var before = quiet ? snap() : null; var t = state.tab; var jobs = [];
+    var before = quiet ? snap() : null; var t = state.tab; var jobs = [loadNotices()];
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
     if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
@@ -851,6 +875,7 @@
       jobs.push(api('GET', '/ui/api/incidents').then(function (i) { state.tabData.incidents = i; }).catch(function () {}));
       jobs.push(api('GET', '/ui/api/audit').then(function (a) { state.tabData.audit = a; }).catch(function () { state.tabData.audit = { items: [] }; }));
       jobs.push(api('GET', '/ui/api/report?from=' + rng).then(function (r) { state.tabData.report = r; }).catch(function () {}));
+      jobs.push(api('GET', '/ui/api/notices?all=1').then(function (r) { state.tabData.noticesAll = r; }).catch(function () {}));
     }
     return Promise.all(jobs).then(function () { if (quiet && snap() === before) return; renderMain(); });
   }
