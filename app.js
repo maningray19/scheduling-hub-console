@@ -45,7 +45,7 @@
     return fetch(base + path, opts).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (j) {
         if (r.ok && toastFor(method, path)) toast(toastFor(method, path));
-        if (j && j.token && path === '/ui/api/login' && base) setToken(j.token);
+        if (j && j.token && (path === '/ui/api/login' || path === '/ui/api/login-sso') && base) setToken(j.token);
         if (path === '/ui/api/logout' && base) setToken(null);
         if (r.status === 401 && path !== '/ui/api/login') { state.user = null; render(); }
         if (!r.ok) { var e = new Error((j && j.error && j.error.message) || 'Request failed'); e.code = j && j.error && j.error.code; e.status = r.status; throw e; }
@@ -197,7 +197,12 @@
     });
     var yt = m.youtube && /^[A-Za-z0-9_-]{10,60}$/.test(m.youtube.playlist || '') ? h('div', { class: 'card' }, h('h2', { text: 'Also on YouTube (unlisted playlist)' }),
       h('iframe', { class: 'player', src: 'https://www.youtube-nocookie.com/embed/videoseries?list=' + m.youtube.playlist, title: 'Tutorial playlist', allow: 'fullscreen', referrerpolicy: 'strict-origin-when-cross-origin' })) : null;
-    return h('div', { class: 'tutorials' }, h('div', null, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, h('p', { class: 'note', text: cur.summary || '' })), yt), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
+    var markers = (cur.markers || []).length ? h('div', { class: 'markers', 'aria-label': 'Jump to a chapter' }, cur.markers.map(function (mk) { return h('button', { class: 'btn secondary mk', type: 'button', text: Math.floor(mk.t / 60) + ':' + (mk.t % 60 < 10 ? '0' : '') + (mk.t % 60) + ' ' + mk.title, onclick: function () { player.currentTime = mk.t; player.play().catch(function () {}); } }); })) : null;
+    var learned = {}; try { learned = JSON.parse(window.localStorage.getItem('pic_learned') || '{}'); } catch (e) { learned = {}; }
+    var points = (cur.points || []).length ? h('div', { class: 'points' }, h('h3', { text: 'Remember' }), (cur.points || []).map(function (pt, i) {
+      var key = cur.id + ':' + i; var cb = h('input', { type: 'checkbox', id: 'pt-' + key, checked: !!learned[key], onchange: function (e) { learned[key] = e.target.checked; try { window.localStorage.setItem('pic_learned', JSON.stringify(learned)); } catch (x) { /* optional */ } } });
+      return h('label', { class: 'pt', for: 'pt-' + key }, cb, h('span', { text: pt })); })) : null;
+    return h('div', { class: 'tutorials' }, h('div', null, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, markers, h('p', { class: 'note', text: cur.summary || '' }), points), yt), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
   }
   function shiftMonth(n) { var d = new Date(state.date + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n, 1); return d.toISOString().slice(0, 10); }
   function breakMarks(ds) {
