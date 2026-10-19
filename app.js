@@ -341,7 +341,7 @@
         h('td', null, h('span', { class: 'chip ' + st[1], text: st[0] })));
     });
     var sent = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Sent items (' + r.items.length + ')' }),
-      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent. "Waiting for company report" means the result was released but the company system has not reported on it yet.' }),
+      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent; it is only counted for a company whose system reports client answers' + ((r.answers_tracked_by || []).length ? ' (now: ' + r.answers_tracked_by.join(', ') + ')' : ' (none yet)') + '. "Waiting for company report" means the result was released but the company system has not reported on it yet.' }),
       r.items.length ? h('table', null, h('thead', null, h('tr', null, ['Sent', 'Company', 'Client', 'Interview', 'E-mail', 'Opened', 'Client answer', 'Status'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
         : h('p', { class: 'note', text: 'No results were sent in this period.' }));
     return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
