@@ -86,7 +86,7 @@
   }
   function calFetch(r) {
     var f = Date.parse(isoStart(r[0])), t = Date.parse(isoStart(r[1]));
-    return api('GET', '/ui/api/calendar?from=' + encodeURIComponent(isoStart(r[0])) + '&to=' + encodeURIComponent(isoStart(r[1]))).then(function (j) {
+    return api('GET', (limited() ? '/ui/api/interviewer/calendar' : '/ui/api/calendar') + '?from=' + encodeURIComponent(isoStart(r[0])) + '&to=' + encodeURIComponent(isoStart(r[1]))).then(function (j) {
       calCache = calCache.filter(function (e) { return !(e.from === f && e.to === t); }); calCache.push({ from: f, to: t, items: j.items, at: Date.now() });
       if (calCache.length > 12) calCache.shift();
       return j.items;
@@ -120,10 +120,11 @@
     if (state.tab === 'calendar') { var hit = calLookup(rangeFor()); state.items = hit ? hit.items : []; state.calLoading = !hit; }
     if (state.tab === 'results') state.tabData.results = resCache[resKey()] || null;
   }
-  function loadControls() { return api('GET', '/ui/api/controls').then(function (c) { state.controls = c; }).catch(function () {}); }
+  function loadControls() { if (limited()) return Promise.resolve(); return api('GET', '/ui/api/controls').then(function (c) { state.controls = c; }).catch(function () {}); }
 
   // ------------------------------------------------------------ pieces
   function eventButton(it) {
+    if (limited()) return limitedEvent(it);
     var d = it.details || {};
     var title = d.client_name || (it.details_unavailable ? 'Details unavailable' : 'Loading details');
     var chips = h('div', { class: 'chips' },
@@ -151,6 +152,23 @@
   function docOk(v) { return DOC_OK.indexOf(String(v === undefined || v === null ? '' : v).toLowerCase()) >= 0; }
   function docsComplete(d) { return !!d && docOk(d.passport) && docOk(d.cv); }
   function docsLabel(d) { return d ? (docsComplete(d) ? 'complete' : 'incomplete') : '-'; }
+  // ---- the Interviewer role: schedule + interview details + documents (view only). Nothing else is drawn for it, and the server refuses everything else anyway.
+  function limited() { return !!(state.user && state.user.role === 'interviewer'); }
+  function limitedEvent(it) {
+    var d = it.details || {}; var title = d.client_name || (it.details_unavailable ? 'Details unavailable' : 'Loading details');
+    return h('button', { class: 'ev ' + it.company + ' ' + it.status, type: 'button', 'data-id': it.id, onclick: function () { openDrawer(it.id); }, 'aria-label': localTime(it.start) + ' ' + title },
+      h('div', { class: 'l1' }, h('strong', { text: localTime(it.start) + '-' + localTime(it.end) }), h('span', { text: title }), d.job_position ? h('span', { class: 'note', text: d.job_position }) : null, d.advisor_name ? h('span', { class: 'note', text: 'Advisor: ' + d.advisor_name }) : null),
+      h('div', { class: 'chips' }, chip(statusLabel(it.status), statusKind(it.status))));
+  }
+  function limitedDrawer(box, dr) {
+    var b = dr.b; var d = b.details || {};
+    box.appendChild(h('h2', { text: d.client_name || 'Interview' }));
+    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Client', d.client_name || '-'], ['Job position', d.job_position || '-'], ['Advisor', d.advisor_name || '-'], ['Company', b.company]];
+    var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
+    if (['confirmed', 'completed'].indexOf(b.status) >= 0) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
+    box.appendChild(h('p', { class: 'note', text: 'View only. Documents are shown live, cannot be downloaded, and every opening is recorded.' }));
+    return box;
+  }
   function isHistory(x) { var d = x.details || {}; return !!x.pre_launch && x.company !== 'RGAB' && !d.advisor_name && !d.job_position && !d.advisor_confirmation; }
   function matches(it) {
     if (state.company && it.company !== state.company) return false;
@@ -213,9 +231,9 @@
       h('button', { class: 'btn secondary', type: 'button', text: 'Next', onclick: function () { state.date = state.view === 'month' ? shiftMonth(1) : addDays(state.date, step); refresh(); } }),
       h('span', { class: 'title', text: title }),
       h('input', { type: 'date', value: state.date, 'aria-label': 'Go to date', onchange: function (e) { if (e.target.value) { state.date = e.target.value; refresh(); } } }),
-      companyFilter(), statusMenu(), searchBox());
+      limited() ? null : companyFilter(), limited() ? null : statusMenu(), searchBox());
     var body = state.view === 'day' ? dayView(state.items, state.date, breakMarks(state.date)) : state.view === 'week' ? weekView(state.items) : monthView(state.items);
-    return h('div', null, statsStrip(), bar, state.error ? h('p', { class: 'err', text: state.error }) : null, state.calLoading ? h('p', { class: 'note', text: 'Loading interviews...' }) : null, body);
+    return h('div', null, limited() ? null : statsStrip(), bar, state.error ? h('p', { class: 'err', text: state.error }) : null, state.calLoading ? h('p', { class: 'note', text: 'Loading interviews...' }) : null, body);
   }
   function statsStrip() {
     var items = (state.items || []).filter(function (i) { return i.status !== 'cancelled'; });
@@ -456,7 +474,7 @@
   }
 
   // ------------------------------------------------------------ notices (the owner writes, the facilitator reads and presses "Got it")
-  function loadNotices() { return api('GET', '/ui/api/notices').then(function (r) { state.notices = r.items; }).catch(function () {}); }
+  function loadNotices() { if (limited()) return Promise.resolve(); return api('GET', '/ui/api/notices').then(function (r) { state.notices = r.items; }).catch(function () {}); }
   function noticesBar() {
     var open = (state.notices || []).filter(function (n) { return n.active && !n.acked; }); if (!open.length) return null;
     return h('div', { class: 'notices' }, open.map(function (n) {
@@ -630,8 +648,9 @@
   // ------------------------------------------------------------ drawer
   function openDrawer(id) {
     state.drawer = { id: id, loading: true }; renderMain();
-    api('GET', '/ui/api/booking/' + id).then(function (b) {
+    api('GET', limited() ? '/ui/api/interviewer/interview/' + id : '/ui/api/booking/' + id).then(function (b) {
       state.drawer = { id: id, b: b }; renderMain();
+      if (limited()) return;
       // if the company offers a grading form for this interview (addendum 0.3.7), show it
       if (b.status === 'completed' && !isHistory(b) && ['none', 'draft'].indexOf(b.assessment_status) >= 0) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) { if (state.drawer && state.drawer.id === id && p && p.grading && Array.isArray(p.grading.criteria)) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; renderMain(); } }).catch(function () {});
     }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
@@ -642,6 +661,7 @@
     var box = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Interview details' }, close);
     if (dr.loading) { box.appendChild(h('p', { text: 'Loading...' })); return box; }
     if (dr.error) { box.appendChild(h('p', { class: 'err', text: dr.error })); return box; }
+    if (limited()) return limitedDrawer(box, dr);
     var b = dr.b; var d = b.details || {}; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
     if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
@@ -730,6 +750,10 @@
       h('div', { class: 'docs-head' }, h('h3', { text: 'Uploaded documents - ' + (((b.details || {}).client_name) || b.company) }), h('button', { class: 'btn secondary', type: 'button', id: 'docs-close', text: 'Close', onclick: function () { dlg.close(); } })),
       h('p', { class: 'note', text: 'Shown live from ' + b.company + '. Nothing is saved in the Command Center, and every view and every download is recorded in the audit history.' }), grid);
     dlg.addEventListener('close', function () { urls.forEach(function (u) { URL.revokeObjectURL(u); }); dlg.remove(); });
+    if (limited()) {   // a visible watermark with the viewer's name and the time, so a screenshot shows who took it
+      var stamp = (state.user.display_name || 'Interviewer') + ' - Interviewer - ' + localDate(new Date().toISOString()) + ' ' + localTime(new Date().toISOString());
+      var wm = h('div', { class: 'watermark', 'aria-hidden': 'true' }); for (var k = 0; k < 24; k++) wm.appendChild(h('span', { text: stamp })); dlg.appendChild(wm);
+    }
     document.body.appendChild(dlg); dlg.showModal();
     api('GET', '/ui/api/booking/' + b.id + '/documents').then(function (l) {
       grid.textContent = '';
@@ -742,7 +766,7 @@
           var u = URL.createObjectURL(new Blob([arr], { type: f.mime })); urls.push(u); body.textContent = '';
           body.appendChild(f.mime === 'application/pdf' ? h('iframe', { class: 'docframe', src: u, title: d.label }) : h('img', { class: 'docimg', src: u, alt: d.label }));
           var ext = ({ 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg' })[f.mime] || 'bin';
-          body.appendChild(h('div', { class: 'docactions' }, h('button', { class: 'btn secondary', type: 'button', text: 'Download', onclick: function (e) {
+          if (!limited()) body.appendChild(h('div', { class: 'docactions' }, h('button', { class: 'btn secondary', type: 'button', text: 'Download', onclick: function (e) {
             var btn = e.target; btn.disabled = true;
             api('POST', '/ui/api/booking/' + b.id + '/documents/' + encodeURIComponent(d.id) + '/download', {}).then(function () { var a = document.createElement('a'); a.href = u; a.download = (d.kind || 'document').replace(/[^A-Za-z0-9_-]/g, '') + '.' + ext; document.body.appendChild(a); a.click(); a.remove(); toast('Download recorded and started'); }).catch(function () { toast('The download could not be recorded, so it was not made. Try again.'); }).then(function () { btn.disabled = false; });
           } })));
@@ -837,7 +861,7 @@
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   function mainShell() {
     var u = state.user; var frozen = state.controls && (state.controls.bookings_enabled === false || state.controls.releases_enabled === false);
-    var tabs = TABS.filter(function (t) { return t[0] !== 'management' || u.role === 'approver' || u.role === 'viewer'; });
+    var tabs = limited() ? TABS.filter(function (t) { return t[0] === 'calendar'; }) : TABS.filter(function (t) { return t[0] !== 'management' || u.role === 'approver' || u.role === 'viewer'; });
     return h('div', null,
       frozen ? h('div', { class: 'banner', role: 'alert', text: 'EMERGENCY FREEZE ACTIVE: new bookings' + (state.controls.releases_enabled === false ? ' and result releases are' : ' are') + ' disabled. Existing appointments are unaffected.' }) : null,
       window.PIC_ENV === 'live' ? null : h('div', { class: 'synth', text: 'DEVELOPMENT BUILD - synthetic data only. Assessment templates shown are clearly marked placeholders, not approved templates.' }),
@@ -865,7 +889,7 @@
   function refreshTab(quiet) {
     var before = quiet ? snap() : null; var t = state.tab; var jobs = [loadNotices()];
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
-    if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
+    if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); if (!limited()) jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
     if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (rq === resKey()) state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
