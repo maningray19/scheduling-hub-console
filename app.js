@@ -151,7 +151,7 @@
   function docOk(v) { return DOC_OK.indexOf(String(v === undefined || v === null ? '' : v).toLowerCase()) >= 0; }
   function docsComplete(d) { return !!d && docOk(d.passport) && docOk(d.cv); }
   function docsLabel(d) { return d ? (docsComplete(d) ? 'complete' : 'incomplete') : '-'; }
-  function isHistory(x) { var d = x.details || {}; return !!x.pre_launch && !d.advisor_name && !d.job_position && !d.advisor_confirmation; }
+  function isHistory(x) { var d = x.details || {}; return !!x.pre_launch && x.company !== 'RGAB' && !d.advisor_name && !d.job_position && !d.advisor_confirmation; }
   function matches(it) {
     if (state.company && it.company !== state.company) return false;
     if (state.status) { var ph = phase(it); if (state.status === 'rescheduled' ? !it.rescheduled : state.status === 'attended' ? it.status !== 'completed' : state.status === 'upcoming' ? ph !== 'upcoming' : state.status === 'ongoing' ? ph !== 'ongoing' : it.status !== state.status) return false; }
@@ -327,13 +327,43 @@
     if (k === 'custom' && state.resFrom && state.resTo && state.resFrom <= state.resTo) return [state.resFrom, addDays(state.resTo, 1)];
     return [addDays(t, -29), addDays(t, 1)];
   }
+  // CSV download of what is on the screen (same period and company filter). Every download is written to the audit trail first (who, what, how many rows).
+  function csvCell(v) { var t = String(v === null || v === undefined ? '' : v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return '"' + t.replace(/"/g, '""') + '"'; }
+  function downloadCsv(name, rows, what) {
+    var text = '\ufeff' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n');
+    return api('POST', '/ui/api/export-log', { what: what, rows: Math.max(0, rows.length - 1) }).then(function () {
+      var url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' })); var a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000); toast('Downloaded ' + name);
+    }).catch(function () { toast('The download could not be recorded, so it was not made. Try again.'); });
+  }
+  function exportSent() {
+    var r = state.tabData.results; if (!r) return; var rg = resRange(); var d = function (iso) { return iso ? localDate(iso) + ' ' + localTime(iso) : ''; };
+    var rows = [['Sent (Dubai)', 'Company', 'Client', 'Advisor / counselor', 'Interview (Dubai)', 'E-mail', 'Opened', 'Client answer', 'Status']].concat(r.items.map(function (i) {
+      var ev = i.events || {}; var delivered = ev.email_delivered || ev.opened || ev.accepted || ev.rejected; var st = RES_STATE[i.state] || [i.state];
+      return [d(i.released_at), i.company, i.history ? 'Client ' + String(i.client_ref).slice(0, 10) + ' (earlier record)' : (i.client_name || ''), i.advisor_name || '', d(i.start),
+        ev.email_bounced && !delivered ? 'Not delivered' : delivered ? 'Delivered' : ev.email_sent ? 'Sent' : '', ev.opened || ev.accepted || ev.rejected ? (ev.opened ? d(ev.opened) : 'Yes') : 'No',
+        ev.accepted ? 'Accepted ' + d(ev.accepted) : ev.rejected ? 'Rejected ' + d(ev.rejected) : '', st[0]];
+    }));
+    return downloadCsv('sent-items_' + rg[0] + '_to_' + addDays(rg[1], -1) + (state.company ? '_' + state.company : '') + '.csv', rows, 'sent_items');
+  }
+  function exportRanking() {
+    var r = state.tabData.results; if (!r) return; var rg = resRange();
+    var list = (r.by_advisor || []).filter(function (a) { return !state.company || a.company === state.company; });
+    var rows = [['Company', 'Advisor / counselor', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Ignored', 'Answered', 'Acceptance rate %', 'Rejection rate %', 'Average answer time (hours)']].concat(list.map(function (a) {
+      var dec = a.accepted + a.rejected;
+      return [a.company, a.advisor_name || (a.advisor_ref ? 'Staff ' + String(a.advisor_ref).slice(0, 8) : 'No counselor on record'), a.released, a.delivered, a.opened, a.accepted, a.rejected, a.ignored, dec,
+        dec ? Math.round(1000 * a.accepted / dec) / 10 : '', dec ? Math.round(1000 * a.rejected / dec) / 10 : '', a.avg_answer_hours === null || a.avg_answer_hours === undefined ? '' : a.avg_answer_hours];
+    }));
+    return downloadCsv('ranking_' + rg[0] + '_to_' + addDays(rg[1], -1) + (state.company ? '_' + state.company : '') + '.csv', rows, 'ranking');
+  }
   function resultsTab() {
     var r = state.tabData.results;
     var preset = h('select', { id: 'res-preset', 'aria-label': 'Reporting period', onchange: function (e) { state.resPreset = e.target.value; refreshTab(); } }, RES_PRESETS.map(function (o) { return h('option', { value: o[0], text: o[1], selected: (state.resPreset || '30d') === o[0] }); }));
     var rg = resRange(); var win = h('div', { class: 'toolbar-group' }, preset);
     if ((state.resPreset || '') === 'custom') { win.appendChild(h('input', { type: 'date', id: 'res-from', value: state.resFrom || rg[0], 'aria-label': 'From', onchange: function (e) { state.resFrom = e.target.value; state.resTo = state.resTo || e.target.value; refreshTab(); } })); win.appendChild(h('input', { type: 'date', id: 'res-to', value: state.resTo || addDays(rg[1], -1), 'aria-label': 'To', onchange: function (e) { state.resTo = e.target.value; state.resFrom = state.resFrom || e.target.value; refreshTab(); } })); }
     win.appendChild(h('span', { class: 'note', text: rg[0] + (addDays(rg[1], -1) !== rg[0] ? ' to ' + addDays(rg[1], -1) : '') + ' (Dubai)' }));
-    var bar = h('div', { class: 'toolbar' }, win, companyFilter(), h('button', { class: 'btn secondary', type: 'button', text: 'Refresh', onclick: function () { refreshTab(); } }));
+    var bar = h('div', { class: 'toolbar' }, win, companyFilter(), h('button', { class: 'btn secondary', type: 'button', text: 'Refresh', onclick: function () { refreshTab(); } }),
+      h('button', { class: 'btn secondary', type: 'button', text: 'Download sent items (CSV)', onclick: exportSent }), h('button', { class: 'btn secondary', type: 'button', text: 'Download ranking (CSV)', onclick: exportRanking }));
     if (!r) return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : h('p', { class: 'note', text: 'Loading...' }));
     var c = r.counts, p = r.pipeline;
     function pct(n) { return c.released ? Math.round(100 * n / c.released) + '% of sent' : ''; }
@@ -382,7 +412,7 @@
         var nums = [a.released, a.delivered, a.opened, a.accepted, a.rejected, a.released - decided - a.bounced - a.waiting_for_company - a.ignored, a.ignored];
         return h('tr', { class: x.rank && x.rank <= 3 ? 'top' + x.rank : '' },
           h('td', { class: 'rank', text: x.rank ? x.rank + medal : '-', title: x.rank ? '' : 'Not ranked: fewer than ' + MIN + ' results for this ranking' }),
-          h('td', { text: a.advisor_name || ('Staff ' + String(a.advisor_ref).slice(0, 8)) }),
+          h('td', { text: a.advisor_name || (a.advisor_ref ? 'Staff ' + String(a.advisor_ref).slice(0, 8) : 'No counselor on record') }),
           nums.map(function (n) { return h('td', { text: String(n) }); }),
           h('td', { text: rate(a.delivered, a.released) }), h('td', { text: rate(a.accepted, decided) + (decided ? ' (of ' + decided + ')' : '') }), h('td', { text: rate(a.rejected, decided) }),
           h('td', { text: a.avg_answer_hours === null || a.avg_answer_hours === undefined ? 'N/A' : a.avg_answer_hours + ' h' }));
@@ -533,7 +563,7 @@
       rep.length ? h('table', null, h('thead', null, h('tr', null, ['Company', 'Interview', 'Assessment', 'Count'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rep.map(function (r) { return h('tr', null, h('td', null, companyBadge(r.company)), h('td', { text: statusLabel(r.status) }), h('td', { text: ASSESS[r.assessment_status] }), h('td', { text: String(r.count) })); }))) : h('p', { class: 'note', text: 'No data.' }));
     var aud = (d.audit || { items: [] }).items;
     var AUDIT_LABEL = { login: 'Signed in', login_failed: 'Sign-in refused (wrong password or code)', logout: 'Signed out', release_requested: 'Result release requested', interview_action: 'Interview action',
-      result_history_import: 'Company loaded earlier results', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
+      result_history_import: 'Company loaded earlier results', export: 'Downloaded a report', emergency_freeze: 'Emergency stop switched on', freeze: 'Emergency stop switched on', enable_requested: 'Asked to switch bookings back on', enable_approved: 'Bookings switched back on',
       link_requested: 'Account link requested', link_approved: 'Account link approved', link_revoked: 'Account link removed', incident_reviewed: 'Incident reviewed' };
     function auditWhat(a) { return AUDIT_LABEL[a.action] || (a.action.charAt(0).toUpperCase() + a.action.slice(1).replace(/_/g, ' ')); }
     function auditDetail(a) {
