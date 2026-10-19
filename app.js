@@ -391,7 +391,16 @@
     }
     var rankSel = h('select', { id: 'rank-by', 'aria-label': 'Rank by', onchange: function (e) { state.rankBy = e.target.value; renderMain(); } }, RANKS.map(function (o) { return h('option', { value: o[0], text: 'Rank by: ' + o[1], selected: by === o[0] }); }));
     var cos = ['RGOS', 'RGAB'].filter(function (co) { return !state.company || state.company === co; });
-    var advisors = h('div', { class: 'rankings' }, h('div', { class: 'toolbar' }, h('strong', { text: 'Ranking of advisors and counselors (a separate card for each company)' }), rankSel), cos.map(rankingCard));
+    // the ranking has its own period buttons (same period as the rest of the page): daily, weekly, monthly or a custom range
+    var QUICK = [['today', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly'], ['lastmonth', 'Last month'], ['30d', 'Last 30 days'], ['custom', 'Custom']];
+    var curP = state.resPreset || '30d';
+    var periodSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Ranking period' }, QUICK.map(function (o) {
+      return h('button', { type: 'button', 'aria-pressed': String(curP === o[0]), text: o[1], onclick: function () { state.resPreset = o[0]; refresh(); } });
+    }));
+    var customBox = curP === 'custom' ? h('span', { class: 'toolbar-group' },
+      h('input', { type: 'date', 'aria-label': 'Ranking from', value: state.resFrom || rg[0], onchange: function (e) { state.resFrom = e.target.value; state.resTo = state.resTo || e.target.value; refresh(); } }),
+      h('input', { type: 'date', 'aria-label': 'Ranking until', value: state.resTo || addDays(rg[1], -1), onchange: function (e) { state.resTo = e.target.value; state.resFrom = state.resFrom || e.target.value; refresh(); } })) : null;
+    var advisors = h('div', { class: 'rankings' }, h('div', { class: 'toolbar' }, h('strong', { text: 'Ranking of advisors and counselors (a separate card for each company)' }), periodSeg, customBox, rankSel), cos.map(rankingCard));
     var rows = r.items.map(function (i) {
       var st = RES_STATE[i.state] || [i.state, '']; var ev = i.events || {};
       var when = function (k) { return ev[k] ? localDate(ev[k]) + ' ' + localTime(ev[k]) : '-'; };
