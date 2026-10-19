@@ -3,18 +3,62 @@
     {
       "id": "full",
       "title": "Full tutorial (all chapters)",
-      "summary": "Everything in one video, about 7 minutes.",
+      "summary": "Everything in one video, about 7 minutes. Click a chapter marker to jump.",
       "file": "full.mp4",
       "poster": "full.png",
-      "minutes": 7
+      "minutes": 7,
+      "markers": [
+        {
+          "t": 0,
+          "title": "Sign in and find your way"
+        },
+        {
+          "t": 67,
+          "title": "The calendar"
+        },
+        {
+          "t": 134,
+          "title": "Opening an interview"
+        },
+        {
+          "t": 173,
+          "title": "Assessment, advisor and release"
+        },
+        {
+          "t": 234,
+          "title": "Queues: your to-do list"
+        },
+        {
+          "t": 259,
+          "title": "Leave, hours and breaks"
+        },
+        {
+          "t": 286,
+          "title": "Linked accounts"
+        },
+        {
+          "t": 310,
+          "title": "Owners: overview and emergency stop"
+        },
+        {
+          "t": 346,
+          "title": "A whole day, from booking to result"
+        }
+      ]
     },
     {
       "id": "start",
       "title": "Sign in and find your way",
-      "summary": "Signing in, the left menu, the top bar and the tour.",
+      "summary": "Signing in with your company login, the left menu, the top bar and the tour.",
       "file": "start.mp4",
       "poster": "start.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Sign in with your company account or your Command Center login name",
+        "Always add the six-digit code from your authenticator app",
+        "The menu is on the left; Tutorials is at the bottom",
+        "The Tour button explains the page, step by step"
+      ]
     },
     {
       "id": "calendar",
@@ -22,7 +66,13 @@
       "summary": "Day, week and month, filters, status and assessment menus.",
       "file": "calendar.mp4",
       "poster": "calendar.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "RGOS is the amber square, RGAB the blue circle",
+        "The four tiles count what you see; click to filter",
+        "Use the status and assessment menus to narrow the list",
+        "Press D, W, M and T for speed"
+      ]
     },
     {
       "id": "interview",
@@ -30,15 +80,27 @@
       "summary": "Details, status chips, history and the form preview.",
       "file": "interview.mp4",
       "poster": "interview.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Click any interview to open it",
+        "Details come live from the company that owns it",
+        "History shows who did what, and when",
+        "Preview shows the form exactly as the client gets it"
+      ]
     },
     {
       "id": "assessment",
-      "title": "Assessment, advisor confirmation and release",
+      "title": "Assessment, advisor and release",
       "summary": "From a finished interview to the result reaching the client, one company at a time.",
       "file": "assessment.mp4",
       "poster": "assessment.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Mark completed, save the draft, then submit",
+        "A warning names the company before anything is sent to the advisor",
+        "Only the advisor of that company sees the request",
+        "Release is sent once, from that company's own address"
+      ]
     },
     {
       "id": "queues",
@@ -46,7 +108,12 @@
       "summary": "What is waiting for you, in the right order.",
       "file": "queues.mp4",
       "poster": "queues.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Upcoming interviews are at the top",
+        "Then assessments to write, results waiting for an advisor, and results ready to release",
+        "Filters and search work here too"
+      ]
     },
     {
       "id": "availability",
@@ -54,7 +121,12 @@
       "summary": "Your working hours, daily break and leave, for both companies.",
       "file": "availability.mp4",
       "poster": "availability.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Your hours and break apply to both companies",
+        "A time you cannot work is unavailable for everybody",
+        "You cannot change a time that already has an interview"
+      ]
     },
     {
       "id": "links",
@@ -62,7 +134,12 @@
       "summary": "Which company accounts are connected to you.",
       "file": "links.mp4",
       "poster": "links.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "A link is made once, with a one-time code from the company",
+        "Only linked accounts can book for you",
+        "An owner can revoke a link at once"
+      ]
     },
     {
       "id": "owners",
@@ -70,7 +147,12 @@
       "summary": "The overview, incidents, audit trail and the emergency stop.",
       "file": "owners.mp4",
       "poster": "owners.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Management shows the overview, incidents and who did what",
+        "Any one owner can freeze new bookings and releases",
+        "Lifting the stop needs a request and the approver's approval"
+      ]
     },
     {
       "id": "day",
@@ -78,7 +160,12 @@
       "summary": "How a booking in a company system appears here, and how both companies stay apart.",
       "file": "day.mp4",
       "poster": "day.png",
-      "minutes": 1
+      "minutes": 1,
+      "points": [
+        "Advisors book from the Booking tab, in their own company system",
+        "A time taken by one company is unavailable for the other",
+        "Aira and the owners see both companies; staff see only their own"
+      ]
     }
   ]
 }
