@@ -130,7 +130,7 @@
       chip(statusLabel(it.status), statusKind(it.status)),
       phase(it) === 'ongoing' ? chip('Ongoing now', 'warn') : null,
       it.rescheduled ? chip('Rescheduled', 'warn') : null,
-      d.documents ? chip('Docs: ' + (d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'complete' : 'incomplete'), d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'ok' : 'warn') : null,
+      d.documents ? chip('Docs: ' + docsLabel(d.documents), docsComplete(d.documents) ? 'ok' : 'warn') : null,
       isHistory(it) ? chip('Handled in ' + it.company + ' portal (history)', '') : chip('Assessment: ' + (ASSESS[it.assessment_status] || it.assessment_status), it.assessment_status === 'released' ? 'ok' : ''),
       d.advisor_confirmation ? chip('Advisor: ' + d.advisor_confirmation.replace('_', ' '), d.advisor_confirmation === 'confirmed' ? 'ok' : (d.advisor_confirmation === 'pending' ? 'warn' : '')) : null,
       d.verification_status ? chip('Verification: ' + d.verification_status, d.verification_status === 'verified' ? 'ok' : '') : null,
@@ -146,6 +146,11 @@
   function phase(it) { var now = Date.now(); return it.status === 'confirmed' ? (Date.parse(it.start) <= now && now < Date.parse(it.end) ? 'ongoing' : (Date.parse(it.start) > now ? 'upcoming' : 'overdue')) : it.status; }
   // An older interview (imported after it took place) is read-only history only while its company system supplies no Counselor or job for it;
   // as soon as the company returns them (RGAB owner's decision 2026-10-19), the normal buttons come back by themselves.
+  // Documents: each company words them its own way (RGOS: "present"; the demo: "valid"). Complete = both passport and CV are on file; anything missing, expired or unclear counts as incomplete.
+  var DOC_OK = ['valid', 'present', 'verified', 'complete', 'completed', 'ok', 'uploaded', 'received', 'on file', 'yes', 'true'];
+  function docOk(v) { return DOC_OK.indexOf(String(v === undefined || v === null ? '' : v).toLowerCase()) >= 0; }
+  function docsComplete(d) { return !!d && docOk(d.passport) && docOk(d.cv); }
+  function docsLabel(d) { return d ? (docsComplete(d) ? 'complete' : 'incomplete') : '-'; }
   function isHistory(x) { var d = x.details || {}; return !!x.pre_launch && !d.advisor_name && !d.job_position && !d.advisor_confirmation; }
   function matches(it) {
     if (state.company && it.company !== state.company) return false;
@@ -273,7 +278,7 @@
       var tr = h('tr', { 'data-id': it.id, tabindex: '0', onclick: function () { openDrawer(it.id); }, onkeydown: function (e) { if (e.key === 'Enter') openDrawer(it.id); } },
         h('td', { text: localDate(it.start) + ' ' + localTime(it.start) }), h('td', null, companyBadge(it.company)), h('td', { text: d.client_name || '-' }), h('td', { text: d.job_position || '-' }),
         h('td', { text: d.advisor_name || '-' }), h('td', { text: statusLabel(it.status) }),
-        h('td', { text: d.documents ? (d.documents.passport === 'valid' && d.documents.cv === 'valid' ? 'complete' : 'incomplete') : '-' }),
+        h('td', { text: docsLabel(d.documents), title: d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : '' }),
         h('td', { text: ASSESS[it.assessment_status] }), h('td', { text: d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : '-' }), h('td', { text: d.result_release ? d.result_release.replace('_', ' ') : '-' }));
       tb.appendChild(tr);
     });
@@ -291,8 +296,8 @@
       sec('Interview queue - upcoming', upcoming, 'Nothing scheduled.'),
       h('div', { class: 'grid2' },
         sec('Assessment queue - to be written', needResult, 'Nothing waiting.'),
-        sec('Pending advisor confirmations', pendingAdvisor, 'Nothing waiting for an advisor.'),
-        sec('Results ready for release', ready, 'No results are ready.')),
+        sec('Pending advisor confirmations', pendingAdvisor, 'Nothing waiting for an advisor.')),
+      sec('Results ready for release', ready, 'No results are ready.'),
       sec('Completed interviews', done, 'None yet.'),
       sec('Cancelled interviews', all.filter(function (i) { return i.status === 'cancelled'; }), 'None.'),
       sec('No-show records', all.filter(function (i) { return i.status === 'no_show'; }), 'None.'));
