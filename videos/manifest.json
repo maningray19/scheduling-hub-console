@@ -1,0 +1,84 @@
+{
+  "chapters": [
+    {
+      "id": "full",
+      "title": "Full tutorial (all chapters)",
+      "summary": "Everything in one video, about 7 minutes.",
+      "file": "full.mp4",
+      "poster": "full.png",
+      "minutes": 7
+    },
+    {
+      "id": "start",
+      "title": "Sign in and find your way",
+      "summary": "Signing in, the left menu, the top bar and the tour.",
+      "file": "start.mp4",
+      "poster": "start.png",
+      "minutes": 1
+    },
+    {
+      "id": "calendar",
+      "title": "The calendar",
+      "summary": "Day, week and month, filters, status and assessment menus.",
+      "file": "calendar.mp4",
+      "poster": "calendar.png",
+      "minutes": 1
+    },
+    {
+      "id": "interview",
+      "title": "Opening an interview",
+      "summary": "Details, status chips, history and the form preview.",
+      "file": "interview.mp4",
+      "poster": "interview.png",
+      "minutes": 1
+    },
+    {
+      "id": "assessment",
+      "title": "Assessment, advisor confirmation and release",
+      "summary": "From a finished interview to the result reaching the client, one company at a time.",
+      "file": "assessment.mp4",
+      "poster": "assessment.png",
+      "minutes": 1
+    },
+    {
+      "id": "queues",
+      "title": "Queues: your to-do list",
+      "summary": "What is waiting for you, in the right order.",
+      "file": "queues.mp4",
+      "poster": "queues.png",
+      "minutes": 1
+    },
+    {
+      "id": "availability",
+      "title": "Leave, hours and breaks",
+      "summary": "Your working hours, daily break and leave, for both companies.",
+      "file": "availability.mp4",
+      "poster": "availability.png",
+      "minutes": 1
+    },
+    {
+      "id": "links",
+      "title": "Linked accounts",
+      "summary": "Which company accounts are connected to you.",
+      "file": "links.mp4",
+      "poster": "links.png",
+      "minutes": 1
+    },
+    {
+      "id": "owners",
+      "title": "Owners: overview and emergency stop",
+      "summary": "The overview, incidents, audit trail and the emergency stop.",
+      "file": "owners.mp4",
+      "poster": "owners.png",
+      "minutes": 1
+    },
+    {
+      "id": "day",
+      "title": "A whole day, from booking to result",
+      "summary": "How a booking in a company system appears here, and how both companies stay apart.",
+      "file": "day.mp4",
+      "poster": "day.png",
+      "minutes": 1
+    }
+  ]
+}
