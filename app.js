@@ -573,7 +573,7 @@
     var msg = h('p', { class: 'err', id: 'listmsg' });
     return h('div', null, bar, msg, data.sections.map(function (sec) {
       var head = h('h2', null, companyBadge(sec.company), ' ' + (sec.title || title) + ' (' + sec.company + ')');
-      if (sec.error) return h('div', { class: 'card' }, head, h('p', { class: 'note', text: sec.error === 'unavailable' ? sec.company + ' did not answer just now. It will try again by itself; if it stays like this, tell the owner.' : sec.error === 'forbidden' ? sec.company + ' did not allow this list for your account. Tell the owner.' : sec.error === 'no_identity' ? 'Your ' + sec.company + ' account is not linked yet. Tell the owner.' : sec.company + ' has not switched this on yet.' }));
+      if (sec.error) return h('div', { class: 'card' }, head, h('p', { class: 'note', text: sec.code === 'outside_hours' ? sec.company + ' shows this list only during interview hours (11:00 AM to 8:00 PM Dubai, break 3:00 to 4:00 PM).' : sec.error === 'unavailable' ? sec.company + ' did not answer just now. It will try again by itself; if it stays like this, tell the owner.' : sec.error === 'forbidden' ? sec.company + ' did not allow this list for your account. Tell the owner.' : sec.error === 'no_identity' ? 'Your ' + sec.company + ' account is not linked yet. Tell the owner.' : sec.company + ' has not switched this on yet.' }));
       return h('div', { class: 'card scroll-x' }, head, sec.note ? h('p', { class: 'note', text: sec.note }) : null,
         sec.rows.length ? h('table', null, h('thead', null, h('tr', null, sec.columns.map(function (c) { return h('th', { text: c.label }); }).concat([h('th', { text: '' })]))),
           h('tbody', null, sec.rows.map(function (r) {
