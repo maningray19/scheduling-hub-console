@@ -539,7 +539,7 @@
             free.forEach(function (s) { slotBox.appendChild(h('button', { type: 'button', class: 'slot', text: localTime(s.start), onclick: function (ev) { picked = s; slotBox.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); }); ev.target.setAttribute('aria-pressed', 'true'); } })); });
           }).catch(function (x) { slotBox.textContent = ''; slotBox.appendChild(h('p', { class: 'err', text: x.message || 'Could not load the times.' })); });
         } });
-        var why = h('input', { type: 'text', maxlength: '300', placeholder: 'Reason (optional)', 'aria-label': 'Reason (optional)' }); field = why;
+        var why = h('input', { type: 'text', maxlength: '300', placeholder: o.reasonLabel || 'Reason (optional)', 'aria-label': o.reasonLabel || 'Reason (optional)' }); field = why;
         body.push(day, slotBox, why);
       }
       body.push(msg, h('div', { class: 'actions' },
@@ -573,7 +573,7 @@
     var msg = h('p', { class: 'err', id: 'listmsg' });
     return h('div', null, bar, msg, data.sections.map(function (sec) {
       var head = h('h2', null, companyBadge(sec.company), ' ' + (sec.title || title) + ' (' + sec.company + ')');
-      if (sec.error) return h('div', { class: 'card' }, head, h('p', { class: 'note', text: sec.company + ' has not switched this on yet.' }));
+      if (sec.error) return h('div', { class: 'card' }, head, h('p', { class: 'note', text: sec.error === 'unavailable' ? sec.company + ' did not answer just now. It will try again by itself; if it stays like this, tell the owner.' : sec.error === 'forbidden' ? sec.company + ' did not allow this list for your account. Tell the owner.' : sec.error === 'no_identity' ? 'Your ' + sec.company + ' account is not linked yet. Tell the owner.' : sec.company + ' has not switched this on yet.' }));
       return h('div', { class: 'card scroll-x' }, head, sec.note ? h('p', { class: 'note', text: sec.note }) : null,
         sec.rows.length ? h('table', null, h('thead', null, h('tr', null, sec.columns.map(function (c) { return h('th', { text: c.label }); }).concat([h('th', { text: '' })]))),
           h('tbody', null, sec.rows.map(function (r) {
