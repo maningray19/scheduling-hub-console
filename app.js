@@ -257,14 +257,12 @@
       return h('button', { class: 'chap' + (c.id === cur.id ? ' on' : ''), type: 'button', 'data-chapter': c.id, onclick: function () { state.tutorial = c.id; state.fx = true; state.forceRender = true; renderMain(); state.forceRender = false; } },
         h('span', { class: 'chap-n', text: c.id === 'full' ? 'All' : String(list.filter(function (x) { return x.id !== 'full'; }).indexOf(c) + 1) }), h('span', { class: 'chap-t' }, h('strong', { text: c.title }), h('span', { class: 'note', text: (c.minutes ? c.minutes + ' min - ' : '') + (c.summary || '') })));
     });
-    var yt = m.youtube && /^[A-Za-z0-9_-]{10,60}$/.test(m.youtube.playlist || '') ? h('div', { class: 'card' }, h('h2', { text: 'Also on YouTube (unlisted playlist)' }),
-      h('iframe', { class: 'player', src: 'https://www.youtube-nocookie.com/embed/videoseries?list=' + m.youtube.playlist, title: 'Tutorial playlist', allow: 'fullscreen', referrerpolicy: 'strict-origin-when-cross-origin' })) : null;
     var markers = (cur.markers || []).length ? h('div', { class: 'markers', 'aria-label': 'Jump to a chapter' }, cur.markers.map(function (mk) { return h('button', { class: 'btn secondary mk', type: 'button', text: Math.floor(mk.t / 60) + ':' + (mk.t % 60 < 10 ? '0' : '') + (mk.t % 60) + ' ' + mk.title, onclick: function () { player.currentTime = mk.t; player.play().catch(function () {}); } }); })) : null;
     var learned = {}; try { learned = JSON.parse(window.localStorage.getItem('pic_learned') || '{}'); } catch (e) { learned = {}; }
     var points = (cur.points || []).length ? h('div', { class: 'points' }, h('h3', { text: 'Remember' }), (cur.points || []).map(function (pt, i) {
       var key = cur.id + ':' + i; var cb = h('input', { type: 'checkbox', id: 'pt-' + key, checked: !!learned[key], onchange: function (e) { learned[key] = e.target.checked; try { window.localStorage.setItem('pic_learned', JSON.stringify(learned)); } catch (x) { /* optional */ } } });
       return h('label', { class: 'pt', for: 'pt-' + key }, cb, h('span', { text: pt })); })) : null;
-    return h('div', { class: 'tutorials' }, h('div', null, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, markers, h('p', { class: 'note', text: cur.summary || '' }), points), yt), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
+    return h('div', { class: 'tutorials' }, h('div', null, h('div', { class: 'card' }, h('h2', { text: cur.title }), player, markers, h('p', { class: 'note', text: cur.summary || '' }), points)), h('div', { class: 'card chapters' }, h('h2', { text: 'Chapters' }), steps));
   }
   function shiftMonth(n) { var d = new Date(state.date + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n, 1); return d.toISOString().slice(0, 10); }
   function breakMarks(ds) {
