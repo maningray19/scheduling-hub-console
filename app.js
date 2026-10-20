@@ -38,6 +38,7 @@
   }
   function api(method, path, body) {
     var base = window.PIC_API_BASE || '';
+    if (state && state.showTest && method === 'GET' && /^\/ui\/api\/(calendar|results|booking|lists)/.test(path)) path += (path.indexOf('?') >= 0 ? '&' : '?') + 'test=1';   // owners only: the server ignores it for everyone else
     var opts = { method: method, credentials: base ? 'omit' : 'same-origin', headers: {} };
     if (method !== 'GET') opts.headers['x-pic-csrf'] = '1';
     if (base) { var tk = getToken(); if (tk) opts.headers.authorization = 'Bearer ' + tk; }
@@ -724,7 +725,10 @@
     var audit = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Audit history' }), aud.length ? h('table', null, h('thead', null, h('tr', null, ['When', 'Who', 'What happened', 'Details'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, aud.slice(0, 40).map(function (a) {
       return h('tr', null, h('td', { text: localDate(a.at) + ' ' + localTime(a.at) }), h('td', { text: a.actor_name || 'Unknown' }), h('td', { text: auditWhat(a) }), h('td', { text: [auditDetail(a), a.target ? 'ref ' + String(a.target).slice(0, 8) : ''].filter(Boolean).join(' - ') }));
     }))) : h('p', { class: 'note', text: 'Nothing recorded yet.' }));
-    return h('div', null, controls, h('div', { class: 'grid2' }, incidents, report), noticesCard(), audit);
+    var testCard = state.user && state.user.role === 'approver' ? h('div', { class: 'card' }, h('h2', { text: 'Test records' }),
+      h('p', { class: 'note', text: 'The QA employee and the QA client are hidden from every screen, for everyone. Switch this on only when you are testing: the test records then appear (marked) for you until you switch it off or sign out.' }),
+      h('label', null, h('input', { type: 'checkbox', id: 'show-test', checked: !!state.showTest, onchange: function (e) { state.showTest = e.target.checked; calCache = []; resCache = {}; refreshAll(); } }), ' Show test records (owners only)')) : null;
+    return h('div', null, controls, testCard, h('div', { class: 'grid2' }, incidents, report), noticesCard(), audit);
   }
 
   function linksTab() {
