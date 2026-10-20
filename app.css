@@ -133,6 +133,9 @@ body.gated { overflow: hidden; }
 .ask-dialog::backdrop { background: #050a1acc; }
 .slotbox { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; max-height: 260px; overflow: auto; }
 .workspace { margin-top: 12px; }
+.notice-scroll { max-height: min(46vh, 420px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin: 10px 0 6px; background: var(--panel2, #f8fafc); }
+.notice-scroll:focus { outline: 2px solid var(--focus, #0891b2); }
+.notice-item summary { cursor: pointer; }
 .toolbar-group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .funnel-row { display: grid; grid-template-columns: 170px 1fr 44px; gap: 10px; align-items: center; margin: 9px 0; font-size: 13.5px; }
 .funnel-row .fl { color: var(--muted); font-weight: 600; } .funnel-row .fn { text-align: right; font-weight: 800; }

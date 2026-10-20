@@ -247,13 +247,14 @@
   // Tutorials: narrated videos, one per menu, listed in the left menu's last entry. Files live next to the page in videos/ (manifest.json lists them).
   function tutorialsTab() {
     var m = state.tabData.videos; var list = (m && m.chapters) || [];
+    if (m === undefined) return h('div', { class: 'card' }, h('h2', { text: 'Tutorials' }), h('p', { class: 'note', text: 'Loading the tutorials...' }));
     if (!list.length) return h('div', { class: 'card' }, h('h2', { text: 'Tutorials' }), h('p', { class: 'note', text: 'The tutorial videos are being prepared and will appear here.' }));
     var cur = state.tutorial && list.filter(function (c) { return c.id === state.tutorial; })[0] || list[0];
     var player = h('video', { class: 'player', controls: true, preload: 'metadata', src: 'videos/' + cur.file, 'aria-label': cur.title });
     if (cur.poster) player.setAttribute('poster', 'videos/' + cur.poster);
     var steps = list.map(function (c) {
-      return h('button', { class: 'chap' + (c.id === cur.id ? ' on' : ''), type: 'button', 'data-chapter': c.id, onclick: function () { state.tutorial = c.id; state.fx = true; renderMain(); } },
-        h('span', { class: 'chap-n', text: String(list.indexOf(c) + 1) }), h('span', { class: 'chap-t' }, h('strong', { text: c.title }), h('span', { class: 'note', text: (c.minutes ? c.minutes + ' min - ' : '') + (c.summary || '') })));
+      return h('button', { class: 'chap' + (c.id === cur.id ? ' on' : ''), type: 'button', 'data-chapter': c.id, onclick: function () { state.tutorial = c.id; state.fx = true; state.forceRender = true; renderMain(); state.forceRender = false; } },
+        h('span', { class: 'chap-n', text: c.id === 'full' ? 'All' : String(list.filter(function (x) { return x.id !== 'full'; }).indexOf(c) + 1) }), h('span', { class: 'chap-t' }, h('strong', { text: c.title }), h('span', { class: 'note', text: (c.minutes ? c.minutes + ' min - ' : '') + (c.summary || '') })));
     });
     var yt = m.youtube && /^[A-Za-z0-9_-]{10,60}$/.test(m.youtube.playlist || '') ? h('div', { class: 'card' }, h('h2', { text: 'Also on YouTube (unlisted playlist)' }),
       h('iframe', { class: 'player', src: 'https://www.youtube-nocookie.com/embed/videoseries?list=' + m.youtube.playlist, title: 'Tutorial playlist', allow: 'fullscreen', referrerpolicy: 'strict-origin-when-cross-origin' })) : null;
@@ -474,14 +475,37 @@
   }
 
   // ------------------------------------------------------------ notices (the owner writes, the facilitator reads and presses "Got it")
-  function loadNotices() { if (limited()) return Promise.resolve(); return api('GET', '/ui/api/notices').then(function (r) { state.notices = r.items; }).catch(function () {}); }
+  function loadNotices() {
+    if (limited()) return Promise.resolve();
+    return api('GET', '/ui/api/notices').then(function (r) { var before = JSON.stringify(state.notices); state.notices = r.items; if (JSON.stringify(r.items) !== before) updateNoticesUi(); }).catch(function () {});
+  }
+  // redraws only the notice bar and the gate, never the screen under them (so a playing tutorial is never rebuilt)
+  function updateNoticesUi() {
+    var m = document.getElementById('main'); if (!m || !state.user) return;
+    var old = m.querySelector('.notices'); if (old) old.remove(); var nb = noticesBar(); if (nb) m.insertBefore(nb, m.firstChild);
+    var og = document.querySelector('.gate'); var keep = og && og.dataset.id; var gate = gateOverlay();
+    if (gate && gate.dataset.id === keep) return; if (og) og.remove(); if (gate) { document.body.appendChild(gate); setTimeout(gate.__check, 30); }
+  }
   function noticesBar() {
     var open = (state.notices || []).filter(function (n) { return n.active && !n.acked && (!n.mandatory || state.user.role !== 'facilitator'); }); if (!open.length) return null;
     return h('div', { class: 'notices' }, open.map(function (n) {
       return h('div', { class: 'notice', role: 'alert' }, h('strong', { class: 'notice-t', text: n.title }), h('p', { class: 'notice-b', text: n.body }),
         h('div', { class: 'notice-f' }, h('span', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) }),
-          h('button', { class: 'btn', type: 'button', text: 'Got it', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', {}).then(function () { n.acked = true; renderMain(); return loadNotices(); }).then(renderMain).catch(function () { e.target.disabled = false; }); } })));
+          h('button', { class: 'btn', type: 'button', text: 'I acknowledge', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', {}).then(function () { n.acked = true; renderMain(); return loadNotices(); }).then(renderMain).catch(function () { e.target.disabled = false; }); } })));
     }));
+  }
+  function noticesTab() {   // every published notice stays here, so it can always be read again
+    var all = state.notices || []; var f = state.noticeFilter || ''; var list = all.filter(function (n) { return !f || (f === 'owner' ? !n.company : n.company === f); });
+    var count = function (k) { return all.filter(function (n) { return k === 'owner' ? !n.company : n.company === k; }).length; };
+    var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Notice history' }, [['', 'All (' + all.length + ')'], ['RGOS', 'RGOS (' + count('RGOS') + ')'], ['RGAB', 'RGAB (' + count('RGAB') + ')'], ['owner', 'From the owner (' + count('owner') + ')']].map(function (o) {
+      return h('button', { type: 'button', 'aria-pressed': String(f === o[0]), text: o[1], onclick: function () { state.noticeFilter = o[0]; renderMain(); } }); }));
+    return h('div', null, h('div', { class: 'card' }, h('h2', { text: 'Notices' }), h('p', { class: 'note', text: 'Everything published for you stays here, with a separate history for RGOS, RGAB and the owner. Your acknowledgement is recorded with the date and time.' }), seg),
+      list.length ? list.map(function (n) {
+        var status = n.acked ? chip('Acknowledged ' + localDate(n.my_acked_at) + ' ' + localTime(n.my_acked_at), 'ok') : chip('Not acknowledged yet', 'warn');
+        return h('details', { class: 'card notice-item', open: !n.acked }, h('summary', null, n.company ? companyBadge(n.company) : null, ' ', h('strong', { text: n.title }), ' ', status, h('span', { class: 'note', text: ' - ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) })),
+          h('p', { class: 'notice-b', text: n.body }),
+          !n.acked && !n.mandatory ? h('button', { class: 'btn', type: 'button', text: 'I acknowledge', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', { read_to_end: true }).then(function () { return loadNotices(); }).then(renderMain).catch(function () { e.target.disabled = false; }); } }) : null);
+      }) : h('p', { class: 'note', text: 'No notices here yet.' }));
   }
   function noticesCard() {
     var list = (state.tabData.noticesAll || { items: [] }).items; var msg = h('p', { class: 'err', id: 'noticemsg' });
@@ -493,7 +517,7 @@
       h('div', { class: 'field' }, h('label', { text: 'Title' }), title), h('div', { class: 'field' }, h('label', { text: 'Text' }), body), h('div', { class: 'field' }, h('label', { text: 'Show to' }), aud), h('div', { class: 'field' }, h('label', { for: 'nt-gated', text: 'Gated: the person must press "Got it" before using the Command Center' }), gated),
       h('button', { class: 'btn', type: 'button', text: 'Post notice', onclick: function () { api('POST', '/ui/api/notices', { title: title.value, body: body.value, audience: aud.value, mandatory: gated.checked }).then(function () { title.value = ''; body.value = ''; return refreshTab(); }).catch(function (x) { msg.textContent = x.message; }); } }), msg,
       list.length ? h('table', null, h('thead', null, h('tr', null, ['Posted', 'Title', 'Seen by', ''].map(function (x) { return h('th', { text: x }); }))),
-        h('tbody', null, list.map(function (n) { var seen = (n.acked_by || []).map(function (a) { return a.name + ' ' + localDate(a.at) + ' ' + localTime(a.at); }).join('; ');
+        h('tbody', null, list.map(function (n) { var seen = (n.acked_by || []).map(function (a) { return a.name + ' ' + localDate(a.at) + ' ' + localTime(a.at) + (a.read_to_end === true ? ' (read to the end)' : ''); }).join('; ');
           return h('tr', null, h('td', { text: localDate(n.created_at) + ' ' + localTime(n.created_at) }), h('td', { text: n.title + (n.active ? '' : ' (removed)') }), h('td', { text: seen || 'Not seen yet' }),
             h('td', null, n.active ? h('button', { class: 'btn secondary', type: 'button', text: 'Remove', onclick: function () { api('DELETE', '/ui/api/notices/' + n.id).then(refreshTab); } }) : null)); }))) : h('p', { class: 'note', text: 'No notices yet.' }));
   }
@@ -567,9 +591,15 @@
   // a gated (mandatory) notice covers the screen until the person presses "Got it"
   function gateOverlay() {
     var n = state.user && state.user.role === 'facilitator' ? (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; })[0] : null; document.body.classList.toggle('gated', !!n); if (!n) return null;
-    return h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': n.title }, h('div', { class: 'gate-box' }, h('h2', { text: n.title }), h('p', { class: 'notice-b', text: n.body }),
-      h('p', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. You must press "Got it" to continue.' }),
-      h('button', { class: 'btn', type: 'button', id: 'gate-ok', text: 'Got it', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', {}).then(function () { n.acked = true; return loadNotices(); }).then(function () { renderMain(); }).catch(function () { e.target.disabled = false; }); } })));
+    var scroller = h('div', { class: 'notice-scroll', tabindex: '0', id: 'gate-text' }, h('p', { class: 'notice-b', text: n.body }));
+    var hint = h('p', { class: 'note', id: 'gate-hint', role: 'status', text: 'Scroll down and read to the end to activate "I acknowledge".' });
+    var reached = false;
+    var ok = h('button', { class: 'btn', type: 'button', id: 'gate-ok', text: 'I acknowledge', disabled: true, onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', { read_to_end: reached }).then(function () { n.acked = true; return loadNotices(); }).then(function () { renderMain(); }).catch(function () { e.target.disabled = false; }); } });
+    var el = h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': n.title, 'data-id': n.id }, h('div', { class: 'gate-box' }, n.company ? h('div', null, companyBadge(n.company), h('span', { class: 'note', text: ' Notice from ' + n.company }), ) : null, h('h2', { text: n.title }),
+      h('p', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. This notice is recorded: your acknowledgement is saved with the date and time.' }), scroller, hint, ok));
+    el.__check = function () { if (reached) return; if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 6) { reached = true; ok.disabled = false; hint.textContent = 'You have read to the end. Press "I acknowledge".'; } };
+    scroller.addEventListener('scroll', el.__check);
+    return el;
   }
   // ------------------------------------------------------------ availability
   function availabilityTab() {
@@ -666,7 +696,7 @@
       h('div', { class: 'field' }, reason),
       h('div', { class: 'actions' },
         h('button', { class: 'btn danger', type: 'button', id: 'freeze-btn', text: 'Freeze new bookings and releases', onclick: function () { api('POST', '/ui/api/controls/freeze', { bookings: true, releases: true, reason: reason.value }).then(refreshAll).catch(function (x) { msg.textContent = x.message; }); } }),
-        frozen ? h('button', { class: 'btn secondary', type: 'button', id: 'enable-req-btn', text: 'Request to re-enable (needs a second approver)', onclick: function () { api('POST', '/ui/api/controls/enable-request', { reason: reason.value || 'Resume normal operation' }).then(refreshAll).catch(function (x) { msg.textContent = x.message; }); } }) : null),
+        frozen ? h('button', { class: 'btn secondary', type: 'button', id: 'enable-req-btn', text: 'Request to re-enable (the owner approves)', onclick: function () { api('POST', '/ui/api/controls/enable-request', { reason: reason.value || 'Resume normal operation' }).then(refreshAll).catch(function (x) { msg.textContent = x.message; }); } }) : null),
       (c.pending_enable || []).map(function (p) { return h('div', null, 'Pending re-enable request (' + p.approvals + '/2 approvals): ' + p.reason + ' ', h('button', { class: 'btn', type: 'button', text: 'Approve', onclick: function () { api('POST', '/ui/api/controls/enable-approve/' + p.id).then(refreshAll).catch(function (x) { msg.textContent = x.code === 'second_approver_required' ? 'A different approver must approve.' : x.message; }); } })); }), msg);
     var inc = (d.incidents || { items: [] }).items;
     var incidents = h('div', { class: 'card' }, h('h2', { text: 'Incidents (' + inc.filter(function (i) { return i.status === 'open'; }).length + ' open)' }),
@@ -704,7 +734,7 @@
     var isFac = state.user && state.user.role === 'facilitator'; var isAppr = state.user && state.user.role === 'approver';
     return h('div', { class: 'grid2' },
       h('div', { class: 'card' }, h('h2', { text: 'Linked company identities' }),
-        h('p', { class: 'note', text: 'Each link is proven by a one-time code issued inside that company portal, then approved by two different approvers. No company password is ever entered here.' }),
+        h('p', { class: 'note', text: 'Each link is proven by a one-time code issued inside that company portal, then approved by the owner (the one approver). No company password is ever entered here.' }),
         l.identities.length ? h('table', null, h('thead', null, h('tr', null, ['Company', 'Reference', 'Linked', 'State', ''].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, l.identities.map(function (i) {
           return h('tr', null, h('td', null, companyBadge(i.company)), h('td', { text: i.employee_ref }), h('td', { text: localDate(i.linked_at) }), h('td', { text: i.revoked_at ? 'revoked' : 'active' }),
             h('td', null, isAppr && !i.revoked_at ? h('button', { class: 'btn danger', type: 'button', text: 'Revoke', onclick: function () { api('POST', '/ui/api/links/identity/' + i.id + '/revoke', {}).then(refreshTab); } }) : null));
@@ -938,7 +968,7 @@
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
   }
-  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
+  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['notices', 'Notices'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   function mainShell() {
     var u = state.user; var frozen = state.controls && (state.controls.bookings_enabled === false || state.controls.releases_enabled === false);
@@ -954,11 +984,12 @@
   }
   function renderMain() {
     var m = document.getElementById('main'); if (!m) return;
+    if (state.tab === 'tutorials' && !state.forceRender) { var pv = m.querySelector('video'); if (pv && !pv.paused && !pv.ended) { updateNoticesUi(); return; } }
     m.textContent = '';
-    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
+    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'notices' ? noticesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     var nb = noticesBar(); if (nb) m.appendChild(nb);
-    var oldGate = document.querySelector('.gate'); if (oldGate) oldGate.remove(); var gate = gateOverlay(); if (gate) document.body.appendChild(gate);
+    var oldGate = document.querySelector('.gate'); if (oldGate) oldGate.remove(); var gate = gateOverlay(); if (gate) { document.body.appendChild(gate); setTimeout(gate.__check, 30); }
     m.appendChild(body); var d = drawerEl(); if (d) m.appendChild(d);
     document.querySelectorAll('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === state.tab)); });
   }
@@ -969,7 +1000,7 @@
   }
   function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll, state.tabData.list_confirmations, state.tabData.list_offers]); }
   function refreshTab(quiet) {
-    var before = quiet ? snap() : null; var t = state.tab; var jobs = [loadNotices()];
+    var before = quiet ? snap() : null; var t = state.tab; var jobs = []; loadNotices();   // notices load on their own and never hold a screen back
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
     if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); if (!limited()) jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
