@@ -762,8 +762,11 @@
   // redraws the open interview card without wiping what is being typed
   function softRender() { if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.closest && document.activeElement.closest('.drawer')) return; renderMain(); }
   // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
-  function loadDrawerExtras(id, b) {
+  function loadDrawerExtras(id, b, quiet) {
       var isFacRole = state.user && (state.user.role === 'facilitator' || state.user.role === 'approver');
+      var live = ['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b); var nreq = (live ? 1 : 0) + (isFacRole && !isHistory(b) ? 1 : 0) + (isFacRole && b.company === 'RGAB' && !isHistory(b) ? 1 : 0);
+      if (state.drawer && state.drawer.id === id) state.drawer.pending = quiet ? 0 : nreq;
+      var settle = function () { if (state.drawer && state.drawer.id === id && state.drawer.pending > 0) { state.drawer.pending -= 1; if (state.drawer.pending === 0) softRender(); } };
       // if the company offers a grading form for this interview (addendum 0.3.7), show it
       if (['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) {
         if (!(state.drawer && state.drawer.id === id && p)) return; var changed = false; var x = state.drawer.extra = state.drawer.extra || {};
@@ -771,16 +774,17 @@
         if (typeof p.to === 'string' && p.to.indexOf('@') > 0 && !p.placeholder && x.client_email !== p.to) { x.client_email = p.to; changed = true; }
         if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria) && !state.drawer.grading) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
         if (p.workspace && p.workspace.actions && p.workspace.actions.length && JSON.stringify(state.drawer.workspace) !== JSON.stringify(p.workspace)) { state.drawer.workspace = p.workspace; changed = true; }
+        if (p.branding && p.branding.name && x.branding !== p.branding.name) { x.branding = p.branding.name; changed = true; }
         if (changed) softRender();
-      }).catch(function () {});
+      }).catch(function () {}).then(settle);
       if (isFacRole && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
         if (!(state.drawer && state.drawer.id === id)) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
         var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; if (x.docs !== txt) { x.docs = txt; softRender(); }
-      }).catch(function () {});
+      }).catch(function () {}).then(settle);
       if (isFacRole && b.company === 'RGAB' && !isHistory(b)) api('GET', '/ui/api/lists/confirmations?company=RGAB').then(function (r) {
         if (!(state.drawer && state.drawer.id === id)) return; var sec = (r.sections || [])[0]; var row = sec && (sec.rows || []).filter(function (q) { return q.booking_id === id; })[0]; if (!row) return;
         var x = state.drawer.extra = state.drawer.extra || {}; var st = row.cells && row.cells.state; if (st && x.confirmation !== st) { x.confirmation = st; softRender(); }
-      }).catch(function () {});
+      }).catch(function () {}).then(settle);
   }
   function drawerEl() {
     var dr = state.drawer; if (!dr) return null;
@@ -789,14 +793,14 @@
     if (dr.loading) { box.appendChild(h('p', { text: 'Loading...' })); return box; }
     if (dr.error) { box.appendChild(h('p', { class: 'err', text: dr.error })); return box; }
     if (limited()) return limitedDrawer(box, dr);
-    var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
+    var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var dash = dr.pending > 0 ? 'Loading...' : '-'; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
     if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
-    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || '-'], [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || '-'],
-      ['Client e-mail', d.client_email || xx.client_email || '-'],
-      ['Documents', d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : (xx.docs || '-')], ['Assessment status', ASSESS[b.assessment_status]],
-      [b.company === 'RGAB' ? 'Counselor confirmation' : 'Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : (xx.confirmation || '-')], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
-      ['Company branding', d.branding || '-']];
+    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || dash], [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || dash],
+      ['Client e-mail', d.client_email || xx.client_email || dash],
+      ['Documents', d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : (xx.docs || dash)], ['Assessment status', ASSESS[b.assessment_status]],
+      [b.company === 'RGAB' ? 'Counselor confirmation' : 'Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : (xx.confirmation || dash)], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
+      ['Company branding', d.branding || xx.branding || dash]];
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
     if (isFac && !isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
@@ -1063,7 +1067,7 @@
     api('GET', '/ui/api/booking/' + dr.id).then(function (nb) {
       if (!state.drawer || state.drawer.id !== dr.id) return; var changed = JSON.stringify(nb) !== JSON.stringify(state.drawer.b);
       if (changed) { state.drawer.b = nb; softRender(); }
-      loadDrawerExtras(dr.id, nb);
+      loadDrawerExtras(dr.id, nb, true);
     }).catch(function () {});
   }
   // a new version of this page: noticed within a minute; reloaded by itself when nothing is being typed or played
