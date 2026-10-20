@@ -3,10 +3,10 @@
     {
       "id": "full",
       "title": "Full tutorial (all chapters)",
-      "summary": "Everything in one video, about 7 minutes. Click a chapter marker to jump.",
+      "summary": "Everything in one video, about 11 minutes. Click a chapter marker to jump.",
       "file": "full.mp4",
       "poster": "full.png",
-      "minutes": 7,
+      "minutes": 11,
       "markers": [
         {
           "t": 0,
@@ -43,6 +43,18 @@
         {
           "t": 346,
           "title": "A whole day, from booking to result"
+        },
+        {
+          "t": 398,
+          "title": "Results sent: counters, ranking and downloads"
+        },
+        {
+          "t": 481,
+          "title": "Grading and documents"
+        },
+        {
+          "t": 565,
+          "title": "New menus, more functions and notices"
         }
       ]
     },
@@ -180,6 +192,34 @@
         "Ignored means no answer after 7 days, only for a company that reports client answers; Waiting for company report means the company has not reported yet",
         "Each company has its own ranking card with medals for the top three; the Rank by menu changes what counts",
         "Two CSV buttons download the sent items or the ranking, and every download is recorded in the audit history"
+      ]
+    },
+    {
+      "id": "grading",
+      "title": "Grading and documents",
+      "summary": "Grade a completed interview with the company grading form, save a draft or submit it, and look at the client documents side by side.",
+      "file": "grading.mp4",
+      "poster": "grading.png",
+      "minutes": 1,
+      "points": [
+        "A completed interview shows the grading form: five criteria, 0 to 20 each, a running total and the pass mark (75)",
+        "Add a note; RGAB needs at least 10 characters before you can submit",
+        "Save draft any time, then Submit",
+        "View uploaded documents side by side: the passport and the CV open next to each other, with a Download button",
+        "Nothing is saved in the Command Center, and every opening is recorded"
+      ]
+    },
+    {
+      "id": "newmenus",
+      "title": "New menus, more functions and notices",
+      "summary": "A notice every facilitator must acknowledge, the Confirmations and Offers menus, and more functions inside an interview.",
+      "file": "newmenus.mp4",
+      "poster": "newmenus.png",
+      "minutes": 2,
+      "points": [
+        "Owners post a notice in Management, Notices; with the Gated box ticked the facilitator must press \"Got it\" before using anything else",
+        "Confirmations and Offers show one section for each company, never mixed; \"has not switched this on yet\" is normal until a company turns the function on",
+        "In an interview, More functions: reschedule with free times and an optional reason, schedule, cancel or resend the result e-mail, reassign the advisor"
       ]
     }
   ]
