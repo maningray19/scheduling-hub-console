@@ -476,7 +476,7 @@
   // ------------------------------------------------------------ notices (the owner writes, the facilitator reads and presses "Got it")
   function loadNotices() { if (limited()) return Promise.resolve(); return api('GET', '/ui/api/notices').then(function (r) { state.notices = r.items; }).catch(function () {}); }
   function noticesBar() {
-    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked && !n.mandatory; }); if (!open.length) return null;
+    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked && (!n.mandatory || state.user.role !== 'facilitator'); }); if (!open.length) return null;
     return h('div', { class: 'notices' }, open.map(function (n) {
       return h('div', { class: 'notice', role: 'alert' }, h('strong', { class: 'notice-t', text: n.title }), h('p', { class: 'notice-b', text: n.body }),
         h('div', { class: 'notice-f' }, h('span', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) }),
@@ -566,7 +566,7 @@
   }
   // a gated (mandatory) notice covers the screen until the person presses "Got it"
   function gateOverlay() {
-    var n = (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; })[0]; document.body.classList.toggle('gated', !!n); if (!n) return null;
+    var n = state.user && state.user.role === 'facilitator' ? (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; })[0] : null; document.body.classList.toggle('gated', !!n); if (!n) return null;
     return h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': n.title }, h('div', { class: 'gate-box' }, h('h2', { text: n.title }), h('p', { class: 'notice-b', text: n.body }),
       h('p', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. You must press "Got it" to continue.' }),
       h('button', { class: 'btn', type: 'button', id: 'gate-ok', text: 'Got it', onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', {}).then(function () { n.acked = true; return loadNotices(); }).then(function () { renderMain(); }).catch(function () { e.target.disabled = false; }); } })));
