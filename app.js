@@ -756,14 +756,31 @@
     api('GET', limited() ? '/ui/api/interviewer/interview/' + id : '/ui/api/booking/' + id).then(function (b) {
       state.drawer = { id: id, b: b }; renderMain();
       if (limited()) return;
+      loadDrawerExtras(id, b);
+    }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
+  }
+  // redraws the open interview card without wiping what is being typed
+  function softRender() { if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.closest && document.activeElement.closest('.drawer')) return; renderMain(); }
+  // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
+  function loadDrawerExtras(id, b) {
+      var isFacRole = state.user && (state.user.role === 'facilitator' || state.user.role === 'approver');
       // if the company offers a grading form for this interview (addendum 0.3.7), show it
       if (['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) {
-        if (!(state.drawer && state.drawer.id === id && p)) return; var changed = false;
-        if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria)) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
-        if (p.workspace && p.workspace.actions && p.workspace.actions.length) { state.drawer.workspace = p.workspace; changed = true; }
-        if (changed) renderMain();
+        if (!(state.drawer && state.drawer.id === id && p)) return; var changed = false; var x = state.drawer.extra = state.drawer.extra || {};
+        if (p.job_position && x.job_position !== p.job_position) { x.job_position = p.job_position; changed = true; } if (p.advisor_name && x.advisor_name !== p.advisor_name) { x.advisor_name = p.advisor_name; changed = true; }
+        if (typeof p.to === 'string' && p.to.indexOf('@') > 0 && !p.placeholder && x.client_email !== p.to) { x.client_email = p.to; changed = true; }
+        if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria) && !state.drawer.grading) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
+        if (p.workspace && p.workspace.actions && p.workspace.actions.length && JSON.stringify(state.drawer.workspace) !== JSON.stringify(p.workspace)) { state.drawer.workspace = p.workspace; changed = true; }
+        if (changed) softRender();
       }).catch(function () {});
-    }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
+      if (isFacRole && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
+        if (!(state.drawer && state.drawer.id === id)) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
+        var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; if (x.docs !== txt) { x.docs = txt; softRender(); }
+      }).catch(function () {});
+      if (isFacRole && b.company === 'RGAB' && !isHistory(b)) api('GET', '/ui/api/lists/confirmations?company=RGAB').then(function (r) {
+        if (!(state.drawer && state.drawer.id === id)) return; var sec = (r.sections || [])[0]; var row = sec && (sec.rows || []).filter(function (q) { return q.booking_id === id; })[0]; if (!row) return;
+        var x = state.drawer.extra = state.drawer.extra || {}; var st = row.cells && row.cells.state; if (st && x.confirmation !== st) { x.confirmation = st; softRender(); }
+      }).catch(function () {});
   }
   function drawerEl() {
     var dr = state.drawer; if (!dr) return null;
@@ -772,13 +789,13 @@
     if (dr.loading) { box.appendChild(h('p', { text: 'Loading...' })); return box; }
     if (dr.error) { box.appendChild(h('p', { class: 'err', text: dr.error })); return box; }
     if (limited()) return limitedDrawer(box, dr);
-    var b = dr.b; var d = b.details || {}; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
+    var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
     if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
-    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || '-'], ['Advisor', d.advisor_name || '-'],
-      ['Client e-mail', d.client_email || '-'],
-      ['Documents', d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : '-'], ['Assessment status', ASSESS[b.assessment_status]],
-      ['Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : '-'], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
+    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || '-'], [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || '-'],
+      ['Client e-mail', d.client_email || xx.client_email || '-'],
+      ['Documents', d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : (xx.docs || '-')], ['Assessment status', ASSESS[b.assessment_status]],
+      [b.company === 'RGAB' ? 'Counselor confirmation' : 'Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : (xx.confirmation || '-')], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
       ['Company branding', d.branding || '-']];
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
@@ -1040,7 +1057,28 @@
   });
   init();
   // Background refresh every 15 s: only on the data screens, never under a video or a form, and only redraws when something really changed (so a playing tutorial is never restarted).
+  function quietDrawer() {
+    var dr = state.drawer; if (!dr || !dr.b || limited() || document.visibilityState !== 'visible') return;
+    if (document.querySelector('dialog[open]') || (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) return;
+    api('GET', '/ui/api/booking/' + dr.id).then(function (nb) {
+      if (!state.drawer || state.drawer.id !== dr.id) return; var changed = JSON.stringify(nb) !== JSON.stringify(state.drawer.b);
+      if (changed) { state.drawer.b = nb; softRender(); }
+      loadDrawerExtras(dr.id, nb);
+    }).catch(function () {});
+  }
+  // a new version of this page: noticed within a minute; reloaded by itself when nothing is being typed or played
+  var pageSig = null; function sigOf(t) { var n = 0; for (var i = 0; i < t.length; i++) n = (n * 31 + t.charCodeAt(i)) | 0; return t.length + ':' + n; }
+  function checkVersion() {
+    fetch('app.js?v=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) {
+      if (!t) return; var sg = sigOf(t); if (pageSig === null) { pageSig = sg; return; } if (sg === pageSig) return;
+      if (!document.getElementById('newver')) { var bar = h('div', { class: 'banner', id: 'newver', role: 'status' }, 'A new version of the Command Center is ready. It will reload in a moment. ', h('button', { class: 'btn secondary', type: 'button', text: 'Reload now', onclick: function () { location.reload(); } })); document.body.insertBefore(bar, document.body.firstChild); }
+      var v = document.querySelector('video'); var busy = (v && !v.paused && !v.ended) || document.querySelector('dialog[open], .gate') || (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName));
+      if (!busy) setTimeout(function () { location.reload(); }, 4000);
+    }).catch(function () {});
+  }
+  checkVersion(); setInterval(checkVersion, 60000);
   setInterval(function () {
+    if (state.user && state.drawer) { quietDrawer(); return; }
     if (!state.user || state.drawer || document.visibilityState !== 'visible' || document.body.classList.contains('touring')) return;
     if (['calendar', 'queues', 'results', 'management'].indexOf(state.tab) < 0) return;
     if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
