@@ -821,8 +821,9 @@
         msg.className = 'err'; msg.textContent = x.message;
       });
     }
+    var nextAction = '';
     function act(label, action, enabled) {
-      return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, title: enabled ? '' : 'Not available yet. See "Next step" above the buttons.', 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
+      return h('button', { class: 'btn secondary' + (enabled ? (action === nextAction ? ' next' : '') : ' locked'), type: 'button', text: label, disabled: !enabled, 'aria-disabled': enabled ? null : 'true', title: enabled ? '' : 'Not available yet. See "Next step" above the buttons.', 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
     }
     if (dr.grading && !isHistory(b)) {
       var gcrit = dr.grading.criteria; var gmax = dr.grading.total_max || gcrit.reduce(function (n, c) { return n + c.max; }, 0); var gtotal = h('strong', { id: 'grade-total', text: '0 / ' + gmax });
@@ -845,13 +846,15 @@
         : as === 'awaiting_advisor' ? 'Sent. Now waiting for the ' + adv + ' to confirm. Nothing to press until the ' + adv + ' answers; "Release result" turns on after that.'
         : as === 'approved' ? 'The ' + adv + ' confirmed. Next step: press "Release result".'
         : as === 'released' ? 'The result was released. Done.' : '';
+      nextAction = sched ? 'complete_interview' : as === 'none' ? (dr.grading && dr.grading.supports_draft === false ? 'submit' : 'save_draft') : as === 'draft' ? 'submit' : as === 'submitted' ? 'request_advisor_confirmation' : as === 'approved' ? 'release' : '';
       if (nextStep) box.appendChild(h('p', { class: 'nextstep', role: 'status', text: nextStep }));
+      if (isFac && !isHistory(b)) box.appendChild(h('p', { class: 'note legend', text: 'Green outline = press this one now. Dashed grey with a lock = not available yet.' }));
       box.appendChild(h('div', { class: 'actions' },
         act('Mark interview completed', 'complete_interview', sched), act('Mark no-show', 'mark_no_show', sched),
         (dr.grading && dr.grading.supports_draft === false) ? null : act('Save assessment draft', 'save_draft', done && b.assessment_status === 'none'),
         act('Submit assessment', 'submit', done && (b.assessment_status === 'draft' || (dr.grading && dr.grading.supports_draft === false && b.assessment_status === 'none'))),
         act('Send to ' + adv + ' for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
-        h('button', { class: 'btn', type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), onclick: function () { confirmRelease(b, msg); } })));
+        h('button', { class: 'btn' + ((done && b.assessment_status === 'approved') ? ' next' : ' locked'), type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), title: (done && b.assessment_status === 'approved') ? '' : 'Not available yet. See "Next step" above the buttons.', onclick: function () { confirmRelease(b, msg); } })));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
     if (!isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
     box.appendChild(msg);

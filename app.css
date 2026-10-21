@@ -296,3 +296,7 @@ dialog::backdrop { background: #070b1699; backdrop-filter: blur(3px); }
 .pt { display: flex; gap: 10px; align-items: flex-start; padding: 5px 0; cursor: pointer; } .pt input { margin-top: 4px; accent-color: var(--brand); } .pt:has(input:checked) span { text-decoration: line-through; color: var(--muted); }
 
 .nextstep { margin: 10px 0; padding: 10px 14px; border-left: 4px solid var(--focus, #0891b2); background: var(--panel2, #f1f5f9); border-radius: 8px; font-weight: 600; }
+.btn.locked, .btn.locked:disabled { border: 2px dashed #94a3b8; background: transparent; color: #64748b; cursor: not-allowed; opacity: 1; }
+.btn.locked::before { content: '\1F512  '; font-size: 0.9em; }
+.btn.next, .btn.next:not(:disabled) { outline: 3px solid #16a34a; outline-offset: 2px; font-weight: 700; }
+.legend { margin: 4px 0 8px; }
