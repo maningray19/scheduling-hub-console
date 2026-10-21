@@ -822,7 +822,7 @@
       });
     }
     function act(label, action, enabled) {
-      return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
+      return h('button', { class: 'btn secondary', type: 'button', text: label, disabled: !enabled, title: enabled ? '' : 'Not available yet. See "Next step" above the buttons.', 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else run(action); } });
     }
     if (dr.grading && !isHistory(b)) {
       var gcrit = dr.grading.criteria; var gmax = dr.grading.total_max || gcrit.reduce(function (n, c) { return n + c.max; }, 0); var gtotal = h('strong', { id: 'grade-total', text: '0 / ' + gmax });
@@ -836,12 +836,21 @@
     if (isHistory(b)) {
       box.appendChild(h('p', { class: 'note history-note', text: 'Handled in the ' + b.company + ' portal, before the Command Center. Grades, the Counselor confirmation and the result e-mail for this interview stay in ' + b.company + '. Shown here as history only; nothing can be sent from here.' }));
     } else if (isFac) {
-      var done = b.status === 'completed'; var sched = b.status === 'confirmed';
+      var done = b.status === 'completed'; var sched = b.status === 'confirmed'; var adv = b.company === 'RGAB' ? 'Counselor' : 'advisor';
+      var as = b.assessment_status; var nextStep = b.status === 'cancelled' || b.status === 'no_show' ? 'This interview was ' + (b.status === 'no_show' ? 'marked no-show' : 'cancelled') + '. Nothing more to press.'
+        : sched ? 'Next step: when the interview is over, press "Mark interview completed" (or "Mark no-show"). The other buttons stay grey until then.'
+        : as === 'none' ? 'Next step: enter the grades (and a note), then press "Save assessment draft". "Submit assessment" turns on after the draft is saved.'
+        : as === 'draft' ? 'Next step: check the grades and the note, then press "Submit assessment". "Send to ' + adv + ' for confirmation" turns on after you submit.'
+        : as === 'submitted' ? 'Next step: press "Send to ' + adv + ' for confirmation".'
+        : as === 'awaiting_advisor' ? 'Sent. Now waiting for the ' + adv + ' to confirm. Nothing to press until the ' + adv + ' answers; "Release result" turns on after that.'
+        : as === 'approved' ? 'The ' + adv + ' confirmed. Next step: press "Release result".'
+        : as === 'released' ? 'The result was released. Done.' : '';
+      if (nextStep) box.appendChild(h('p', { class: 'nextstep', role: 'status', text: nextStep }));
       box.appendChild(h('div', { class: 'actions' },
         act('Mark interview completed', 'complete_interview', sched), act('Mark no-show', 'mark_no_show', sched),
         (dr.grading && dr.grading.supports_draft === false) ? null : act('Save assessment draft', 'save_draft', done && b.assessment_status === 'none'),
         act('Submit assessment', 'submit', done && (b.assessment_status === 'draft' || (dr.grading && dr.grading.supports_draft === false && b.assessment_status === 'none'))),
-        act('Send to advisor for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
+        act('Send to ' + adv + ' for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
         h('button', { class: 'btn', type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), onclick: function () { confirmRelease(b, msg); } })));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
     if (!isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
