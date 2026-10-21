@@ -803,9 +803,10 @@
       [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || dash],
       ['Client e-mail', d.client_email || xx.client_email || dash],
       ['Documents', d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : (xx.docs || dash)], ['Assessment status', ASSESS[b.assessment_status]],
-      [b.company === 'RGAB' ? 'Counselor confirmation' : 'Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : (xx.confirmation || dash)], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],
+      [b.company === 'RGAB' ? 'Counselor confirmation' : 'Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : (xx.confirmation || (b.assessment_status === 'approved' ? 'Confirmed' : dash))], ['Verification', d.verification_status || 'Not provided by ' + b.company], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : 'Not provided by ' + b.company],
       ['Company branding', d.branding || xx.branding || dash]];
-    var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
+    if (Array.isArray(d.info)) d.info.forEach(function (line) { if (line && line.label && line.value) rows.push([line.label, line.value]); });
+    var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { class: r[2] ? 'missing' : '', text: r[2] ? 'MISSING - ' + b.company + ' has not sent the program applied' : r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
     if (isFac && !isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
     var msg = h('p', { class: 'err', id: 'drawermsg' });
