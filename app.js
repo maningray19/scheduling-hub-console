@@ -165,7 +165,8 @@
     var b = dr.b; var d = b.details || {};
     box.appendChild(h('h2', { text: d.client_name || 'Interview' }));
     var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Client', d.client_name || '-'], ['Job position', d.job_position || '-'], ['Advisor', d.advisor_name || '-'], ['Company', b.company]];
-    var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { text: r[1] })); }); box.appendChild(dl);
+    (d.info || []).forEach(function (x) { rows.push([x.label, x.value]); });
+    var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { class: r[2] ? 'missing' : '', text: r[2] ? 'MISSING - ' + b.company + ' has not sent the program applied' : r[1] })); }); box.appendChild(dl);
     if (['confirmed', 'completed'].indexOf(b.status) >= 0) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
     box.appendChild(h('p', { class: 'note', text: 'View only. Documents are shown live, cannot be downloaded, and every opening is recorded.' }));
     return box;
@@ -798,7 +799,8 @@
     var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var dash = dr.pending > 0 ? 'Loading...' : '-'; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
     if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
-    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || dash], [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || dash],
+    var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || dash], ['Program applied', d.program_applied || dash, !d.program_applied && !(dr.pending > 0)], ['Country applied', d.country_applied || dash], ['Salary', d.salary || dash], ['Nationality', d.nationality || dash],
+      [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || dash],
       ['Client e-mail', d.client_email || xx.client_email || dash],
       ['Documents', d.documents ? 'Passport: ' + d.documents.passport + ', CV: ' + d.documents.cv : (xx.docs || dash)], ['Assessment status', ASSESS[b.assessment_status]],
       [b.company === 'RGAB' ? 'Counselor confirmation' : 'Advisor confirmation', d.advisor_confirmation ? d.advisor_confirmation.replace('_', ' ') : (xx.confirmation || dash)], ['Verification', d.verification_status || '-'], ['Result release', d.result_release ? d.result_release.replace('_', ' ') : '-'],

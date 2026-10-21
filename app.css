@@ -300,3 +300,4 @@ dialog::backdrop { background: #070b1699; backdrop-filter: blur(3px); }
 .btn.locked::before { content: '\1F512  '; font-size: 0.9em; }
 .btn.next, .btn.next:not(:disabled) { outline: 3px solid #16a34a; outline-offset: 2px; font-weight: 700; }
 .legend { margin: 4px 0 8px; }
+.kv dd.missing { color: #b91c1c; font-weight: 700; }
