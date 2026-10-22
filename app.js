@@ -942,9 +942,10 @@
   // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
   function loadDrawerExtras(id, b, quiet) {
       var dr = state.drawer; if (!dr || dr.id !== id || dr.extrasLoading) return Promise.resolve();
-      dr.extrasLoading = true; var previousErrors = JSON.stringify(dr.loadErrors || {}); dr.loadErrors = {};
+      dr.extrasLoading = true; var previousErrors = JSON.stringify(dr.loadErrors || {}); var documentError = dr.loadErrors && dr.loadErrors.documents;
+      dr.loadErrors = quiet && documentError ? { documents: documentError } : {};
       var isFacRole = state.user && (state.user.role === 'facilitator' || state.user.role === 'approver');
-      var live = ['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b); var nreq = (live ? 1 : 0) + (isFacRole && !isHistory(b) ? 1 : 0) + (isFacRole && b.company === 'RGAB' && !isHistory(b) ? 1 : 0);
+      var live = ['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b); var nreq = (live ? 1 : 0) + (isFacRole && !isHistory(b) && !quiet ? 1 : 0) + (isFacRole && b.company === 'RGAB' && !isHistory(b) ? 1 : 0);
       dr.pending = quiet ? 0 : nreq; var remaining = nreq;
       var settle = function () { remaining -= 1; if (state.drawer !== dr) return; if (dr.pending > 0) dr.pending -= 1; if (remaining <= 0) { dr.extrasLoading = false; if (!quiet || previousErrors !== JSON.stringify(dr.loadErrors)) softRender(); } };
       var failed = function (part, e) { if (state.drawer === dr) dr.loadErrors[part] = e.message || 'Could not load. Press Retry.'; };
@@ -960,7 +961,8 @@
         if (p.branding && p.branding.name && x.branding !== p.branding.name) { x.branding = p.branding.name; changed = true; }
         if (changed) softRender();
       }).catch(function (e) { failed('preview', e); }).then(settle);
-      if (isFacRole && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
+      // Document listing is an audited user view. Background status refresh must not generate another view audit.
+      if (isFacRole && !isHistory(b) && !quiet) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
         if (state.drawer !== dr) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
         var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; if (x.docs !== txt) { x.docs = txt; softRender(); }
       }).catch(function (e) { failed('documents', e); }).then(settle);
@@ -1061,26 +1063,38 @@
   function previewBlock(p) {
     if (typeof p.html === 'string' && p.html.trim() && p.html.length <= 400000) {   // company HTML stays inside the isolated, network-blocked frame
       var status = h('p', { class: 'note', role: 'status', text: 'Loading the result e-mail design...' });
-      var fr = h('iframe', { class: 'previewframe', src: 'preview-frame.html?v=20261022', sandbox: 'allow-scripts', title: 'The result e-mail as it will be sent' });
-      var timer; var disposed = false;
+      var frameUrl = 'preview-frame.html?v=20261022p2';
+      var fr = h('iframe', { class: 'previewframe', src: frameUrl, sandbox: 'allow-scripts', title: 'The result e-mail as it will be sent', 'data-preview-stage': 'created', 'data-preview-attempt': '1', 'data-preview-revision': '20261022p2', 'data-preview-ready': 'false', 'data-preview-loaded': 'false' });
+      var timer; var disposed = false; var rendered = false; var automaticRetried = false; var attempt = 1; var stage = 'created';
       var retry = h('button', { class: 'btn secondary', type: 'button', text: 'Retry design', hidden: true, onclick: function () {
-        status.className = 'note'; status.textContent = 'Loading the result e-mail design...'; retry.hidden = true;
-        fr.src = 'preview-frame.html?v=20261022&retry=' + Date.now(); arm();
+        restart(false);
       } });
-      function fail() { status.className = 'err'; status.textContent = 'The design could not be displayed. Retry the design; nothing has been sent.'; retry.hidden = false; }
-      function arm() { clearTimeout(timer); timer = setTimeout(function () { if (!disposed) fail(); }, 10000); }
-      function send() { try { fr.contentWindow.postMessage({ html: p.html }, '*'); } catch (e) { fail(); } }
+      function mark(next) { stage = next; fr.setAttribute('data-preview-stage', next); }
+      function fail(reason) { clearTimeout(timer); fr.setAttribute('data-preview-last-stage', stage); fr.setAttribute('data-preview-failure', reason); mark('failed'); status.className = 'err'; status.textContent = 'The design could not be displayed. Retry the design; nothing has been sent.'; retry.hidden = false; }
+      function restart(automatic) {
+        if (disposed) return;
+        clearTimeout(timer); rendered = false; attempt++; fr.setAttribute('data-preview-attempt', String(attempt)); fr.setAttribute('data-preview-ready', 'false'); fr.setAttribute('data-preview-loaded', 'false'); fr.removeAttribute('data-preview-failure'); fr.removeAttribute('data-preview-last-stage');
+        mark(automatic ? 'automatic_retry' : 'manual_retry'); status.className = 'note';
+        status.textContent = automatic ? 'The preview is taking longer. Retrying once; nothing is being sent.' : 'Loading the result e-mail design...'; retry.hidden = true;
+        fr.src = frameUrl + '&attempt=' + attempt + '&retry=' + Date.now(); arm();
+      }
+      function recover(reason) { if (!automaticRetried) { automaticRetried = true; restart(true); } else fail(reason); }
+      function arm() { clearTimeout(timer); timer = setTimeout(function () { if (!disposed && !rendered) recover('timeout'); }, 10000); }
+      function send() { try { fr.contentWindow.postMessage({ html: p.html, attempt: attempt }, '*'); mark('html_sent'); } catch (e) { fail('message_send_error'); } }
       function receive(ev) {
         if (disposed || ev.source !== fr.contentWindow || !ev.data) return;
-        if (ev.data.preview === 'ready') send();
-        if (ev.data.preview === 'error') { clearTimeout(timer); fail(); }
-        if (typeof ev.data.h === 'number' && isFinite(ev.data.h)) {
+        if (ev.data.attempt !== attempt || ev.data.revision !== '20261022p2') return;
+        if (ev.data.preview === 'ready') { fr.setAttribute('data-preview-ready', 'true'); mark('renderer_ready'); send(); return; }
+        if (ev.data.preview === 'stage' && ['parsing_html', 'sanitizing_html'].indexOf(ev.data.stage) >= 0) mark(ev.data.stage);
+        if (ev.data.preview === 'error') { fail('renderer_error'); return; }
+        if (ev.data.preview === 'rendered' && typeof ev.data.h === 'number' && isFinite(ev.data.h)) {
+          rendered = true; mark('rendered'); fr.removeAttribute('data-preview-failure'); fr.removeAttribute('data-preview-last-stage');
           fr.style.height = Math.min(Math.max(ev.data.h + 8, 160), 1600) + 'px'; clearTimeout(timer);
           status.className = 'note'; status.textContent = 'Result e-mail design loaded. Preview only; nothing has been sent.'; retry.hidden = true;
         }
       }
-      fr.addEventListener('load', function () { if (!disposed) { arm(); send(); } });
-      fr.addEventListener('error', fail); window.addEventListener('message', receive); arm();
+      fr.addEventListener('load', function () { if (!disposed && !rendered) { fr.setAttribute('data-preview-loaded', 'true'); mark('frame_loaded'); send(); } });
+      fr.addEventListener('error', function () { if (!disposed && !rendered) recover('frame_load_error'); }); window.addEventListener('message', receive); arm();
       fr.__disposePreview = function () { disposed = true; clearTimeout(timer); window.removeEventListener('message', receive); };
       return h('div', { class: 'brandbox brand-' + p.company },
         h('dl', { class: 'kv' }, h('dt', { text: 'From' }), h('dd', { text: p.from || '-' }), h('dt', { text: 'To' }), h('dd', { text: p.to || '-' }), h('dt', { text: 'Subject' }), h('dd', { text: p.subject || '-' })),

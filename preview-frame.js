@@ -17,23 +17,31 @@
       });
     });
   }
-  function tell() { try { parent.postMessage({ preview: 'rendered', h: Math.ceil(document.documentElement.scrollHeight) }, '*'); } catch (e) { /* no parent */ } }
+  var revision = '20261022p2';
+  var attemptMatch = /(?:^|[?&])attempt=([1-9][0-9]{0,5})(?:&|$)/.exec(window.location && window.location.search || '');
+  var ownAttempt = attemptMatch ? Number(attemptMatch[1]) : 1;
+  function stage(name, attempt) { document.documentElement.setAttribute('data-preview-stage', name); parent.postMessage({ preview: 'stage', stage: name, attempt: attempt, revision: revision }, '*'); }
+  function tell(attempt) { try { document.documentElement.setAttribute('data-preview-stage', 'rendered'); parent.postMessage({ preview: 'rendered', attempt: attempt, revision: revision, h: Math.ceil(document.documentElement.scrollHeight) }, '*'); } catch (e) { /* no parent */ } }
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || typeof d.html !== 'string') return;
-    if (!d.html.trim() || d.html.length > 400000) { parent.postMessage({ preview: 'error' }, '*'); return; }
+    if (d.attempt !== ownAttempt) return;
+    var attempt = ownAttempt;
+    if (!d.html.trim() || d.html.length > 400000) { parent.postMessage({ preview: 'error', attempt: attempt, revision: revision }, '*'); return; }
     try {
+    stage('parsing_html', attempt);
     // first remove scripts and event handlers from the text itself, so nothing even tries to run while it is being read
     var text = d.html.replace(RE_SCRIPT, '').replace(RE_HANDLER, '');
-    var doc = new DOMParser().parseFromString(text, 'text/html'); clean(doc);
+    var doc = new DOMParser().parseFromString(text, 'text/html'); stage('sanitizing_html', attempt); clean(doc);
     Array.prototype.slice.call(document.head.querySelectorAll('style')).forEach(function (s) { s.remove(); });
     Array.prototype.slice.call(doc.querySelectorAll('style')).forEach(function (s) { document.head.appendChild(document.importNode(s, true)); s.remove(); });
     document.body.textContent = '';
     document.body.removeAttribute('style');
     if (doc.body && doc.body.getAttribute('style')) document.body.setAttribute('style', doc.body.getAttribute('style'));
     Array.prototype.slice.call(doc.body ? doc.body.childNodes : []).forEach(function (n) { document.body.appendChild(document.importNode(n, true)); });
-    tell(); setTimeout(tell, 300);
-    } catch (error) { parent.postMessage({ preview: 'error' }, '*'); }
+    tell(attempt); setTimeout(function () { tell(attempt); }, 300);
+    } catch (error) { document.documentElement.setAttribute('data-preview-stage', 'renderer_error'); parent.postMessage({ preview: 'error', attempt: attempt, revision: revision }, '*'); }
   });
-  parent.postMessage({ preview: 'ready' }, '*');
+  document.documentElement.setAttribute('data-preview-revision', revision); document.documentElement.setAttribute('data-preview-stage', 'renderer_ready');
+  parent.postMessage({ preview: 'ready', attempt: ownAttempt, revision: revision }, '*');
 })();
