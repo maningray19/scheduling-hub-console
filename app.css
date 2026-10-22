@@ -126,9 +126,25 @@ main { padding: 18px 22px 60px; max-width: 1320px; margin: 0 auto; }
 .notice-f { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .watermark { position: fixed; inset: 0; z-index: 20; pointer-events: none; display: grid; grid-template-columns: repeat(3, 1fr); align-content: space-around; overflow: hidden; opacity: .16; }
 .watermark span { transform: rotate(-24deg); font: 800 20px/1.2 Segoe UI, system-ui, sans-serif; color: #111; text-align: center; white-space: nowrap; padding: 26px 0; }
-.gate { position: fixed; inset: 0; z-index: 5000; background: #050a1ae6; display: grid; place-items: center; padding: 20px; }
-.gate-box { background: var(--panel, #fff); border-radius: 16px; padding: 22px 26px; max-width: 640px; max-height: 90vh; overflow: auto; box-shadow: 0 30px 80px #000a; border-top: 8px solid var(--warn, #b45309); }
-body.gated { overflow: hidden; }
+/* Mandatory notices use a fixed viewport; only the message scrolls. */
+.gate { position: fixed; inset: 0; z-index: 5000; box-sizing: border-box; height: 100vh; height: 100dvh; display: grid; place-items: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: #050a1ad9; overscroll-behavior: contain; isolation: isolate; }
+.gate .gate-box { box-sizing: border-box; width: min(100%, 720px); min-width: 0; min-height: 0; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; margin: 0; padding: clamp(14px, 3vw, 28px); gap: 14px; background: var(--panel, #fff); color: var(--fg, #172033); border: 1px solid var(--line, #d6deea); border-top: 5px solid var(--warn, #b45309); border-radius: 18px; box-shadow: 0 24px 90px #0008; overflow-wrap: anywhere; }
+.gate .gate-header { flex: 0 0 auto; min-width: 0; }
+.gate .gate-eyebrow { color: var(--warn, #92400e); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px; }
+.gate .gate-company { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.gate h2 { font-size: clamp(20px, 2.4vw, 28px); line-height: 1.2; margin: 0 0 10px; }
+.gate .gate-header .note { margin: 0; line-height: 1.45; }
+.gate .notice-scroll { box-sizing: border-box; flex: 1 1 auto; min-height: 48px; max-height: min(48vh, 500px); max-height: min(48dvh, 500px); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border: 1px solid var(--line, #d6deea); border-radius: 10px; padding: 14px 16px; margin: 0; background: var(--panel2, #f8fafc); line-height: 1.65; }
+.gate .notice-b { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gate .gate-footer { flex: 0 0 auto; display: grid; gap: 10px; }
+.gate .gate-footer .note, .gate .gate-error { margin: 0; }
+.gate .gate-error:empty { display: none; }
+.gate .gate-footer .btn { justify-self: end; min-height: 44px; min-width: 180px; }
+.gate .gate-footer .btn:disabled { opacity: .6; cursor: not-allowed; }
+.gate :focus-visible { outline: 3px solid var(--focus, #0891b2); outline-offset: 3px; }
+body.gated { overflow: hidden; overscroll-behavior: none; }
+@media (max-width: 480px), (max-height: 600px) { .gate .gate-box { gap: 10px; padding: 14px; border-radius: 12px; } .gate .gate-footer .btn { width: 100%; justify-self: stretch; } .gate .gate-header .note { font-size: 12px; } .gate .gate-eyebrow { margin-bottom: 6px; font-size: 11px; } .gate h2 { font-size: 20px; margin-bottom: 6px; } .gate .notice-scroll { padding: 10px; } }
+@media (prefers-reduced-motion: reduce) { .gate, .gate * { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 .ask-dialog { border: 0; border-radius: 16px; padding: 20px 24px; min-width: min(560px, 92vw); box-shadow: 0 30px 80px #000a; }
 .ask-dialog::backdrop { background: #050a1acc; }
 .slotbox { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; max-height: 260px; overflow: auto; }
@@ -530,3 +546,9 @@ nav.tabs button[aria-selected=true] { background: linear-gradient(110deg, #17274
   .notification-item.is-read { background: #1c3045; border-left-color: #8ba3b9; }
   .notifications-dialog .note { color: #c0d1df; }
 }
+
+.notification-operational { border-left-color: #b77811; }
+.operational-guidance { font-size: 14px; line-height: 1.55; }
+.operational-guidance h4 { margin: 12px 0 6px; }
+.operational-guidance ol { padding-left: 22px; }
+.operational-guidance li { margin-bottom: 8px; }

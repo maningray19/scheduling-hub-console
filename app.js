@@ -28,7 +28,7 @@
     setTimeout(function () { t.classList.add('out'); setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 350); }, 2600);
   }
   function toastFor(method, path) {
-    if (method === 'GET' || /\/ui\/api\/(login|logout)$/.test(path) || /\/notifications\/[0-9]+\/read$/.test(path)) return null;
+    if (method === 'GET' || /\/ui\/api\/(login|logout)$/.test(path) || /\/notifications\/[0-9]+\/read$/.test(path) || /\/operational-issues\/[a-f0-9-]{36}\/read$/.test(path)) return null;
     if (/\/release/.test(path)) return 'Result released';
     if (/\/action$/.test(path)) return 'Interview updated';
     if (/controls\/freeze/.test(path)) return 'Emergency freeze is ON';
@@ -708,15 +708,71 @@
   }
   // a gated (mandatory) notice covers the screen until the person presses "Got it"
   function gateOverlay() {
-    var n = state.user && state.user.role === 'facilitator' ? (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; })[0] : null; document.body.classList.toggle('gated', !!n); if (!n) return null;
-    var scroller = h('div', { class: 'notice-scroll', tabindex: '0', id: 'gate-text' }, h('p', { class: 'notice-b', text: n.body }));
-    var hint = h('p', { class: 'note', id: 'gate-hint', role: 'status', text: 'Scroll down and read to the end to activate "I acknowledge".' });
-    var reached = false;
-    var ok = h('button', { class: 'btn', type: 'button', id: 'gate-ok', text: 'I acknowledge', disabled: true, onclick: function (e) { e.target.disabled = true; api('POST', '/ui/api/notices/' + n.id + '/ack', { read_to_end: reached }).then(function () { n.acked = true; return loadNotices(); }).then(function () { renderMain(); }).catch(function () { e.target.disabled = false; }); } });
-    var el = h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': n.title, 'data-id': n.id }, h('div', { class: 'gate-box' }, n.company ? h('div', null, companyBadge(n.company), h('span', { class: 'note', text: ' Notice from ' + n.company }), ) : null, h('h2', { text: n.title }),
-      h('p', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. This notice is recorded: your acknowledgement is saved with the date and time.' }), scroller, hint, ok));
-    el.__check = function () { if (reached) return; if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 6) { reached = true; ok.disabled = false; hint.textContent = 'You have read to the end. Press "I acknowledge".'; } };
-    scroller.addEventListener('scroll', el.__check);
+    var pending = state.user && state.user.role === 'facilitator' ? (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; }) : [];
+    var n = pending[0]; document.body.classList.toggle('gated', !!n); if (!n) return null;
+    var reached = false, sending = false, initialized = false, disposed = false;
+    var lastHeight = 0, lastWidth = 0, resizeObserver, removalObserver;
+    var content = h('p', { class: 'notice-b', text: n.body });
+    var scroller = h('div', { class: 'notice-scroll', tabindex: '0', id: 'gate-text', role: 'region', 'aria-label': 'Notice message. Scroll here to read to the end.' }, content);
+    var hint = h('p', { class: 'note', id: 'gate-hint', role: 'status', 'aria-live': 'polite', text: 'Read the message below. Scroll inside the message to reach the end.' });
+    var error = h('p', { class: 'err gate-error', role: 'alert' });
+    var ok = h('button', { class: 'btn', type: 'button', id: 'gate-ok', text: 'I acknowledge', disabled: true, onclick: function () {
+      el.__check(); if (!reached || sending || disposed) return;
+      sending = true; ok.disabled = true; error.textContent = '';
+      api('POST', '/ui/api/notices/' + n.id + '/ack', { read_to_end: true }).then(function () { n.acked = true; return loadNotices(); }).then(function () { renderMain(); }).catch(function (failure) {
+        if (!el.isConnected) return; sending = false; error.textContent = failure.message || 'Acknowledgement could not be verified. Please try again.'; el.__check();
+      });
+    } });
+    var header = h('header', { class: 'gate-header' }, h('div', { class: 'gate-eyebrow', text: 'Required notice' + (pending.length > 1 ? ' | ' + pending.length + ' awaiting acknowledgement' : '') }),
+      n.company ? h('div', { class: 'gate-company' }, companyBadge(n.company), h('span', { class: 'note', text: ' Notice from ' + n.company })) : null,
+      h('h2', { id: 'gate-title', text: n.title }),
+      h('p', { class: 'note', id: 'gate-description', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. Read this notice before continuing. Your explicit acknowledgement is recorded with the date and time.' }));
+    var el = h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'gate-title', 'aria-describedby': 'gate-description gate-hint', 'data-id': n.id },
+      h('section', { class: 'gate-box', tabindex: '-1' }, header, scroller, h('footer', { class: 'gate-footer' }, hint, error, ok)));
+    function focusMessage() { if (el.isConnected) scroller.focus({ preventScroll: true }); }
+    function keydown(event) {
+      if (!el.isConnected) return;
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return; }
+      if (event.key !== 'Tab') return;
+      var targets = Array.prototype.slice.call(el.querySelectorAll('a[href], button:not([disabled]), [tabindex="0"]')).filter(function (node) { return node.getClientRects().length; });
+      var first = targets[0], last = targets[targets.length - 1];
+      if (!first) { event.preventDefault(); focusMessage(); return; }
+      if (!el.contains(document.activeElement) || (event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+        event.preventDefault(); (event.shiftKey ? last : first).focus({ preventScroll: true });
+      }
+    }
+    function focusin(event) { if (el.isConnected && !el.contains(event.target)) focusMessage(); }
+    function fontsLoading() { reached = false; el.__check(); }
+    function dispose() {
+      if (disposed) return; disposed = true;
+      if (resizeObserver) resizeObserver.disconnect(); if (removalObserver) removalObserver.disconnect();
+      window.removeEventListener('resize', el.__check); document.removeEventListener('keydown', keydown, true); document.removeEventListener('focusin', focusin, true);
+      if (document.fonts && document.fonts.removeEventListener) { document.fonts.removeEventListener('loadingdone', el.__check); document.fonts.removeEventListener('loading', fontsLoading); }
+      if (!document.querySelector('.gate')) {
+        document.body.classList.remove('gated'); var previous = document.body.__picGateReturnFocus; delete document.body.__picGateReturnFocus;
+        if (previous && previous.isConnected && typeof previous.focus === 'function') previous.focus({ preventScroll: true });
+        else { var main = document.getElementById('main'); if (main) { main.setAttribute('tabindex', '-1'); main.focus({ preventScroll: true }); } }
+      }
+    }
+    el.__check = function () {
+      if (disposed || !el.isConnected) return;
+      if (!initialized) {
+        initialized = true;
+        if (!document.body.__picGateReturnFocus) document.body.__picGateReturnFocus = document.activeElement;
+        document.addEventListener('keydown', keydown, true); document.addEventListener('focusin', focusin, true); window.addEventListener('resize', el.__check);
+        if (typeof ResizeObserver === 'function') { resizeObserver = new ResizeObserver(el.__check); resizeObserver.observe(scroller); resizeObserver.observe(content); }
+        removalObserver = new MutationObserver(function () { if (!el.isConnected) dispose(); }); removalObserver.observe(document.body, { childList: true });
+        if (document.fonts) { document.fonts.ready.then(function () { if (!disposed) el.__check(); }); if (document.fonts.addEventListener) { document.fonts.addEventListener('loadingdone', el.__check); document.fonts.addEventListener('loading', fontsLoading); } }
+        focusMessage();
+      }
+      var remaining = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      if ((lastHeight !== scroller.scrollHeight || lastWidth !== scroller.clientWidth) && remaining > 2) reached = false;
+      lastHeight = scroller.scrollHeight; lastWidth = scroller.clientWidth;
+      if (scroller.clientHeight > 0 && remaining <= 2 && (!document.fonts || document.fonts.status !== 'loading')) reached = true;
+      ok.disabled = sending || !reached;
+      hint.textContent = sending ? 'Saving your acknowledgement...' : reached ? 'End of notice reached. Select "I acknowledge" to continue.' : 'Scroll inside the message to the end to enable "I acknowledge".';
+    };
+    scroller.addEventListener('scroll', el.__check, { passive: true });
     return el;
   }
   // ------------------------------------------------------------ availability
@@ -1229,7 +1285,7 @@
       api('GET', '/ui/api/live-updates' + query, undefined, { signal: controller.signal }).then(function (snapshot) {
         if (!current()) return;
         if (!snapshot || !/^[0-9a-f]{32}$/.test(snapshot.revision) || !Array.isArray(snapshot.items)) throw new Error('Updates temporarily unavailable');
-        var fingerprint = JSON.stringify(snapshot.items.map(function (item) { return [item.id, item.booking_id, item.company, item.event, item.at, item.start, item.end, item.status, item.assessment_status, item.disposition_code]; }).sort(function (a, b) { return String(a[0]).localeCompare(String(b[0])); }));
+        var fingerprint = JSON.stringify(snapshot.items.map(function (item) { return [item.id, item.booking_id, item.company, item.event, item.at, item.start, item.end, item.status, item.assessment_status, item.disposition_code, item.record_type, item.kind, item.issue_id]; }).sort(function (a, b) { return String(a[0]).localeCompare(String(b[0])); }));
         var changed = live.fingerprint && live.fingerprint !== fingerprint;
         live.fingerprint = fingerprint;
         live.revision = snapshot.revision; live.items = snapshot.items; live.unread = Math.max(0, Number(snapshot.unread) || 0); live.failures = 0; live.status = 'Live updates connected';
@@ -1265,6 +1321,36 @@
     if (!result.advisor && current && current.extra) result.advisor = label(current.extra.advisor_name);
     return result;
   }
+  function operationalGuidance(item) {
+    var uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+    if (!item || item.record_type !== 'operational_issue' || item.event !== 'operational_issue' || ['RGOS', 'RGAB'].indexOf(item.company) < 0 || !uuid.test(item.issue_id || '') || item.id !== 'issue:' + item.issue_id) return null;
+    var catalog = {
+      duplicate_booking: { title: 'Possible duplicate appointment', what: 'More than one appointment may represent the same intended interview. This alert does not decide which appointment is extra.', steps: ['Open the existing records and compare their booking references, dates and statuses. A matching client name alone is not proof of a duplicate.', 'Preserve the original completed interview and every released assessment.', 'Ask the assigned advisor/counselor and interview coordinator to verify the extra appointment.', 'Only after verification, an authorized coordinator may archive or cancel the extra appointment through the company controls, recording a reason. Do not deactivate the client account.'] },
+      failed_sync: { title: 'Scheduling records need reconciliation', what: 'The company and shared calendar have not confirmed the same state. This alert is not proof that a booking failed or was lost.', steps: ['Check the existing company interview and shared calendar for their current date and status.', 'Keep the original request reference. Ask the company coordinator and technical support to reconcile the records.', 'Do not submit a replacement booking or cancel an appointment merely because a reply was lost.'] },
+      scheduling_unavailable: { title: 'Scheduling service needs review', what: 'The scheduling service reported an availability problem. Existing appointment status still needs to be checked.', steps: ['Check the existing interview or current request before trying again.', 'Use the booking backup guide to prepare a request for review if the calendar remains unavailable. A prepared request is not a confirmed appointment.', 'Ask the company coordinator and technical support to verify service availability. Do not delete or cancel appointments to work around the outage.'] },
+      booking_recovery_pending: { title: 'Booking recovery is pending', what: 'The booking may still be reconciling. This alert does not prove that no booking exists.', steps: ['Check the current interview and its confirmation status using the same request reference.', 'Ask the company coordinator and technical support to verify recovery before repeating a write.', 'Keep the same booking identity. Do not cancel locally, create another booking or deactivate the client account while the outcome is uncertain.'] }
+    };
+    if (!Object.prototype.hasOwnProperty.call(catalog, item.kind)) return null;
+    var entry = catalog[item.kind];
+    return { title: entry.title, what: entry.what, steps: entry.steps.slice(0), reference: item.issue_id, company: item.company,
+      coordinator: item.company === 'RGAB' ? 'Coordinate with the assigned Immigration Counselor and Team Leader or Management. The Super Admin handles access and technical issues.' : 'Coordinate with the assigned advisor and Team Leader or Super Admin. The Super Admin handles access and technical issues.',
+      bookingId: uuid.test(item.booking_id || '') ? item.booking_id : null };
+  }
+  function notificationReadPath(item) {
+    if (item && item.record_type === 'operational_issue') {
+      var guidance = operationalGuidance(item); return guidance ? '/ui/api/operational-issues/' + guidance.reference + '/read' : '';
+    }
+    return item && /^[1-9][0-9]{0,18}$/.test(String(item.id)) ? '/ui/api/notifications/' + item.id + '/read' : '';
+  }
+  function operationalInstructions(guidance) {
+    return h('div', { class: 'operational-guidance' },
+      h('p', { text: guidance.what }),
+      h('p', null, h('strong', { text: 'Who to coordinate with: ' }), guidance.coordinator),
+      h('h4', { text: 'Next steps' }), h('ol', null, guidance.steps.map(function (step) { return h('li', { text: step }); })),
+      h('p', { class: 'note', text: 'Issue reference: ' + guidance.reference }),
+      h('p', { class: 'note', text: 'Marking this alert as read means you have seen it. It does not resolve the issue or deactivate any record.' }));
+  }
+
   function notificationsDialog() {
     if (document.getElementById('notifications-dialog')) return;
     var opener = document.activeElement; var session = liveSession;
@@ -1277,25 +1363,28 @@
       unreadFilter.setAttribute('aria-pressed', String(!showAll)); allFilter.setAttribute('aria-pressed', String(showAll));
       var visible = live.items.filter(function (item) { return showAll || !item.read; });
       visible.forEach(function (item) {
-        var identity = notificationIdentity(item);
+        var issue = operationalGuidance(item);
+        if (item.record_type === 'operational_issue' && !issue) return;
+        var identity = issue && !issue.bookingId ? { client: '', advisor: '' } : notificationIdentity(item);
         var mark = h('button', { class: 'btn secondary', type: 'button', text: item.read ? 'Read' : 'Mark as read', disabled: !!item.read });
-        var row = h('article', { class: 'notification-item' + (item.read ? ' is-read' : '') },
-          h('div', { class: 'notification-heading' }, ['RGAB', 'RGOS'].indexOf(item.company) >= 0 ? companyBadge(item.company) : null, h('h3', { text: LIVE_LABELS[item.event] || 'Interview updated' })),
-          h('p', { class: 'notification-identity', text: identity.client || 'Details available in interview' }),
+        var row = h('article', { class: 'notification-item' + (issue ? ' notification-operational' : '') + (item.read ? ' is-read' : '') },
+          h('div', { class: 'notification-heading' }, ['RGAB', 'RGOS'].indexOf(item.company) >= 0 ? companyBadge(item.company) : null, h('h3', { text: issue ? issue.title : LIVE_LABELS[item.event] || 'Interview updated' })),
+          h('p', { class: 'notification-identity', text: identity.client || (issue && !issue.bookingId ? 'Company-level alert; no interview attached.' : 'Details available in interview') }),
           identity.advisor ? h('p', { class: 'note notification-advisor', text: 'Assigned advisor/counselor: ' + identity.advisor }) : null,
           h('p', { class: 'note', text: Number.isFinite(Date.parse(item.at)) ? new Date(item.at).toLocaleString('en-GB', { timeZone: TZ }) + ' Dubai time' : 'Recent interview update' }),
           Number.isFinite(Date.parse(item.start)) ? h('p', { class: 'note', text: 'Appointment: ' + fmtDay(localDate(item.start)) + ' at ' + localTime(item.start) + ' Dubai time' }) : null,
+          issue ? operationalInstructions(issue) : null,
           item.event === 'not_completed' ? h('p', { class: 'notification-explanation', text: INCOMPLETE_EXPLANATION }) : null,
           item.event === 'assessment_status' && ASSESS[item.assessment_status] ? h('p', { class: 'note', text: 'Assessment: ' + ASSESS[item.assessment_status] + '. View the interview for its available next step.' }) : null,
-          h('div', { class: 'notification-actions' }, mark, h('button', { class: 'btn secondary', type: 'button', text: 'View interview', onclick: function () { dialog.close(); openDrawer(item.booking_id); } })));
+          h('div', { class: 'notification-actions' }, mark, (issue && !issue.bookingId) ? null : h('button', { class: 'btn secondary', type: 'button', text: 'View interview', onclick: function () { dialog.close(); openDrawer(item.booking_id); } })));
         mark.addEventListener('click', function () {
-          if (!/^[1-9][0-9]{0,18}$/.test(String(item.id))) return;
+          var readPath = notificationReadPath(item); if (!readPath) return;
           mark.disabled = true; mark.textContent = 'Saving…';
-          api('POST', '/ui/api/notifications/' + item.id + '/read', {}).then(function () {
+          api('POST', readPath, {}).then(function () {
             if (session !== liveSession || !state.user) return;
             live.items.forEach(function (existing) { if (String(existing.id) === String(item.id)) { if (!existing.read) live.unread = Math.max(0, live.unread - 1); existing.read = true; } }); item.read = true;
             if (showAll) { row.classList.add('is-read'); mark.textContent = 'Read'; } else { draw(); unreadFilter.focus(); }
-            updateLiveButton(); message.textContent = 'Update marked as read.';
+            updateLiveButton(); message.textContent = issue ? 'Alert marked as read. This does not resolve the issue.' : 'Update marked as read.';
           }).catch(function (error) { if (session === liveSession) { mark.disabled = false; mark.textContent = 'Mark as read'; message.textContent = error.message; } });
         });
         list.appendChild(row);
