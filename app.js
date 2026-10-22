@@ -53,7 +53,7 @@
     var timer = setTimeout(function () { expired = true; controller.abort(); }, method === 'GET' ? (/\/live-updates/.test(path) ? 35000 : 25000) : 45000);
     return fetch(base + path, opts).then(function (r) {
       return r.json().catch(function (e) { if (expired) throw e; return null; }).then(function (j) {
-        if (r.ok && toastFor(method, path)) toast(toastFor(method, path));
+        if (r.ok && !(typeof isPendingActionResponse === 'function' && isPendingActionResponse(j)) && (!j || j.ok !== false) && toastFor(method, path)) toast(toastFor(method, path));
         if (j && j.token && (path === '/ui/api/login' || path === '/ui/api/login-sso') && base) setToken(j.token);
         if (path === '/ui/api/logout' && base) setToken(null);
         if (r.status === 401 && path !== '/ui/api/login' && state.user === requestUser && (typeof liveSession !== 'number' || liveSession === requestSession)) { if (typeof endSession === 'function') endSession(); else state.user = null; render(); }
@@ -664,6 +664,52 @@
               h('button', { class: 'btn secondary workflow-jump', type: 'button', text: shortcuts[index], onclick: function () { jump(index, message); } }), message)));
       })));
   }
+  // Session hints bridge drawer refreshes; fresh company workspace readback restores them after reload.
+  var pendingActionState = Object.create(null); var pendingActionVersions = Object.create(null);
+  function isPendingActionResponse(reply) {
+    return !!reply && typeof reply === 'object' && (reply.pending === true || ['move_pending', 'recovery_pending', 'scheduling_pending'].indexOf(reply.code) >= 0 || ['pending', 'recovery_pending'].indexOf(reply.status) >= 0);
+  }
+  function actionOperationRef(value) { return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value) ? value : ''; }
+  function pendingActionKey(booking) { return booking && ['RGOS', 'RGAB'].indexOf(booking.company) >= 0 && actionOperationRef(booking.id) ? booking.company + ':' + booking.id : ''; }
+  function pendingActionVersion(booking) { return pendingActionVersions[pendingActionKey(booking)] || 0; }
+  function pendingActionFor(booking) { return pendingActionState[pendingActionKey(booking)] || null; }
+  function syncPendingAction(booking, workspace, readVersion) {
+    var key = pendingActionKey(booking);
+    if (!key || !workspace || readVersion !== pendingActionVersion(booking) || !Object.prototype.hasOwnProperty.call(workspace, 'pending_action')) return false;
+    var value = workspace.pending_action;
+    if (value === null) { var existed = !!pendingActionState[key]; delete pendingActionState[key]; return existed; }
+    if (!value || value.kind !== 'reschedule' || ['pending', 'review'].indexOf(value.status) < 0 || !actionOperationRef(value.operation_ref)) return false;
+    var previous = JSON.stringify(pendingActionState[key] || null);
+    pendingActionState[key] = { kind: 'reschedule', status: value.status, operation_ref: value.operation_ref };
+    return previous !== JSON.stringify(pendingActionState[key]);
+  }
+  function recordCompanyAction(booking, action, reply) {
+    if (isPendingActionResponse(reply)) {
+      var key = pendingActionKey(booking); var ref = actionOperationRef(reply.operation_ref) || actionOperationRef(reply.move_receipt);
+      if (reply.operation_ref && reply.move_receipt && actionOperationRef(reply.operation_ref) !== actionOperationRef(reply.move_receipt)) ref = '';
+      if (key) {
+        pendingActionVersions[key] = pendingActionVersion(booking) + 1;
+        pendingActionState[key] = { kind: action === 'reschedule' || reply.code === 'move_pending' ? 'reschedule' : 'company_action', status: 'pending', operation_ref: ref };
+      }
+      return true;
+    }
+    if (reply && reply.ok === false) {
+      var error = new Error(reply.code === 'move_operation_closed' ? 'The company closed this reschedule request without confirming a new time. Refresh the current interview before requesting another change.' : 'The company did not confirm this change. Refresh the current interview and check its status before trying again.');
+      error.code = reply.code; throw error;
+    }
+    return false;
+  }
+  function pendingActionCard(booking) {
+    var pending = pendingActionFor(booking); if (!pending) return null;
+    var reschedule = pending.kind === 'reschedule';
+    return h('div', { class: 'notice pending-action', role: 'status', 'aria-live': 'polite' },
+      h('strong', { text: pending.status === 'review' ? 'Company review is required' : reschedule ? 'Reschedule verification is pending' : 'Company verification is pending' }),
+      h('p', { text: booking.company + ' has not confirmed this change. ' + (reschedule ? 'The requested new time is not confirmed. ' : '') + 'The interview below remains the last reported current appointment.' }),
+      h('p', { text: 'Do not repeat the action, create a replacement, or cancel merely to clear this pending request. Coordinate a genuine cancellation with the assigned advisor/counselor and company Team Leader or Super Admin.' }),
+      h('p', { class: 'note', text: pending.operation_ref ? 'Request reference: ' + pending.operation_ref : 'A valid request reference was not supplied. Ask the owning company to check the existing interview.' }),
+      h('button', { class: 'btn secondary', type: 'button', text: 'Refresh current interview', onclick: function () { openDrawer(booking.id); } }));
+  }
+
   function workspaceCard(b, dr, msg) {
     var ws = dr.workspace; if (!ws) return null;
     var actions = Array.isArray(ws.actions) ? ws.actions.filter(function (a) { return a.id !== 'mark_not_completed'; }) : []; var mail = ws.result_email;
@@ -676,10 +722,11 @@
         h('p', { class: 'note', text: 'Release hands the result to ' + b.company + '. A scheduled result has not been sent yet. Check Results sent for the company\'s sending and delivery reports.' })) : null,
       !sending.length ? h('p', { class: 'note', text: b.company + ' is not offering a change to the sending schedule for this interview and account right now.' }) : h('h4', { text: 'Sending controls' }),
       h('div', { class: 'actions' }, sending.concat(other).map(function (a) {
-        return h('button', { class: 'btn secondary', type: 'button', 'data-ws': a.id, text: a.label, onclick: function () {
+        return h('button', { class: 'btn secondary', type: 'button', 'data-ws': a.id, text: a.label, disabled: a.id === 'reschedule' && !!pendingActionFor(b), onclick: function () {
+          if (a.id === 'reschedule' && pendingActionFor(b)) return;
           askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label, bookingId: b.id }).then(function (params) {
             if (!params) return; msg.className = 'err'; msg.textContent = '';
-            return api('POST', '/ui/api/booking/' + b.id + '/action', { action: a.id, params: params }).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+            return api('POST', '/ui/api/booking/' + b.id + '/action', { action: a.id, params: params }).then(function (reply) { if (recordCompanyAction(b, a.id, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
           });
         } });
       })));
@@ -942,6 +989,7 @@
   // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
   function loadDrawerExtras(id, b, quiet) {
       var dr = state.drawer; if (!dr || dr.id !== id || dr.extrasLoading) return Promise.resolve();
+      var pendingReadVersion = typeof pendingActionVersion === 'function' ? pendingActionVersion(b) : 0;
       dr.extrasLoading = true; var previousErrors = JSON.stringify(dr.loadErrors || {}); var documentError = dr.loadErrors && dr.loadErrors.documents;
       dr.loadErrors = quiet && documentError ? { documents: documentError } : {};
       var isFacRole = state.user && (state.user.role === 'facilitator' || state.user.role === 'approver');
@@ -957,6 +1005,7 @@
         if (typeof p.to === 'string' && p.to.indexOf('@') > 0 && !p.placeholder && x.client_email !== p.to) { x.client_email = p.to; changed = true; }
         if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria) && !state.drawer.grading) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
         var workspace = p.workspace && typeof p.workspace === 'object' && Array.isArray(p.workspace.actions) ? p.workspace : null;
+        if (typeof syncPendingAction === 'function' && syncPendingAction(b, workspace, pendingReadVersion)) changed = true;
         if (JSON.stringify(dr.workspace || null) !== JSON.stringify(workspace)) { dr.workspace = workspace; changed = true; }
         if (p.branding && p.branding.name && x.branding !== p.branding.name) { x.branding = p.branding.name; changed = true; }
         if (changed) softRender();
@@ -980,6 +1029,7 @@
     if (limited()) return limitedDrawer(box, dr);
     var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var dash = dr.pending > 0 ? 'Loading...' : '-'; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
+    var pendingCard = pendingActionCard(b); if (pendingCard) box.appendChild(pendingCard);
     if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
     var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || dash], ['Program applied', d.program_applied || dash, !d.program_applied && !(dr.pending > 0)], ['Country applied', d.country_applied || dash], ['Salary', d.salary || dash], ['Nationality', d.nationality || dash],
       [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || dash],
@@ -1007,7 +1057,7 @@
         if (need && (!dr.note || dr.note.trim().length < need)) { msg.className = 'err'; msg.textContent = 'Write a note of at least ' + need + ' characters before you submit.'; return Promise.resolve(); }
         payload.grades = gv; if (dr.note && dr.note.trim()) payload.note = dr.note.trim();
       }
-      return api('POST', '/ui/api/booking/' + b.id + '/action', payload).then(function () { return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) {
+      return api('POST', '/ui/api/booking/' + b.id + '/action', payload).then(function (reply) { if (recordCompanyAction(b, action, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) {
         if (x.code === 'not_applicable' || /Interview Workspace/.test(String(x.message))) { msg.className = 'note'; msg.textContent = b.company + ' records grades in its own Interview Workspace and does not accept them from the Command Center yet. The request to allow it here has been sent to ' + b.company + '; until it is switched on, save or submit this assessment in the ' + b.company + ' Interview Workspace.'; return; }
         msg.className = 'err'; msg.textContent = x.message;
       });
@@ -1064,7 +1114,7 @@
     if (typeof p.html === 'string' && p.html.trim() && p.html.length <= 400000) {   // company HTML stays inside the isolated, network-blocked frame
       var status = h('p', { class: 'note', role: 'status', text: 'Loading the result e-mail design...' });
       var frameUrl = 'preview-frame.html?v=20261022p2';
-      var fr = h('iframe', { class: 'previewframe', src: frameUrl, sandbox: 'allow-scripts', title: 'The result e-mail as it will be sent', 'data-preview-stage': 'created', 'data-preview-attempt': '1', 'data-preview-revision': '20261022p2', 'data-preview-ready': 'false', 'data-preview-loaded': 'false' });
+      var fr = h('iframe', { class: 'previewframe', src: frameUrl, sandbox: 'allow-scripts', loading: 'eager', fetchpriority: 'high', title: 'The result e-mail as it will be sent', 'data-preview-stage': 'created', 'data-preview-attempt': '1', 'data-preview-revision': '20261022p2', 'data-preview-ready': 'false', 'data-preview-loaded': 'false' });
       var timer; var disposed = false; var rendered = false; var automaticRetried = false; var attempt = 1; var stage = 'created';
       var retry = h('button', { class: 'btn secondary', type: 'button', text: 'Retry design', hidden: true, onclick: function () {
         restart(false);
@@ -1185,7 +1235,7 @@
       var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p),
         h('p', { text: 'Release asks ' + p.company + ' to process this result using its own checks and sending schedule. A recorded release does not prove the e-mail was sent or delivered. Recipient, template and branding are validated by that company.' }),
         h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p), text: 'Yes, release', onclick: function () {
-          dlg.close(); api('POST', '/ui/api/booking/' + b.id + '/release', {}).then(function (r) { msg.className = 'ok'; msg.textContent = 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
+          dlg.close(); api('POST', '/ui/api/booking/' + b.id + '/release', {}).then(function (r) { var pending = recordCompanyAction(b, 'release', r); msg.className = pending ? 'note' : 'ok'; msg.textContent = pending ? 'Company verification is pending. Refresh the current interview to check its status.' : 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); if (pending) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
         } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
       document.body.appendChild(dlg); dlg.addEventListener('close', function () { disposePreviews(dlg); dlg.remove(); }); dlg.showModal();
     }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
@@ -1251,7 +1301,7 @@
     if (live.controller) live.controller.abort(); live.controller = null;
   }
   function endSession() {
-    stopLive(); liveSession++; setToken(null); state.user = null; state.drawer = null; state.items = []; state.tabData = {}; state.wide = null; state.controls = null; state.notices = null; state.loaded = null; state.error = null;
+    stopLive(); liveSession++; setToken(null); pendingActionState = Object.create(null); pendingActionVersions = Object.create(null); state.user = null; state.drawer = null; state.items = []; state.tabData = {}; state.wide = null; state.controls = null; state.notices = null; state.loaded = null; state.error = null;
     calEpoch++; calCache = []; resCache = {}; calPending = {};
     live.revision = ''; live.fingerprint = ''; live.items = []; live.unread = 0; live.dirty = false; live.drawerPending = false;
     var dialog = document.getElementById('notifications-dialog'); if (dialog) { dialog.close(); dialog.remove(); }
