@@ -1250,6 +1250,21 @@
     live.status = 'Connecting'; updateLiveButton(); poll();
   }
   var LIVE_LABELS = { confirmed: 'Interview scheduled', rescheduled: 'Interview rescheduled', cancelled: 'Interview cancelled', completed: 'Interview completed', no_show: 'Client did not attend', not_completed: 'Interview Not Completed', assessment_status: 'Assessment updated', advisor_details_confirmed: 'Advisor confirmed AR assessment details', advisor_details_correction_requested: 'Advisor requested corrections to AR assessment details', result_released: 'Result released', result_email_sent: 'Result e-mail sent', result_email_delivered: 'Result e-mail delivered', result_email_bounced: 'Result e-mail bounced', result_opened: 'Result opened', result_accepted: 'Result accepted', result_rejected: 'Result rejected' };
+  function notificationIdentity(item) {
+    var result = { client: '', advisor: '' };
+    if (!item || ['RGOS', 'RGAB'].indexOf(item.company) < 0 || typeof item.booking_id !== 'string') return result;
+    var dr = state.drawer; var current = dr && dr.b && dr.id === item.booking_id && dr.b.company === item.company ? dr : null;
+    var candidates = (current ? [current.b] : []).concat(state.items || [], state.wide || []);
+    function label(value) { return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 160) : ''; }
+    candidates.forEach(function (booking) {
+      if (!booking || booking.id !== item.booking_id || booking.company !== item.company) return;
+      var details = booking.details || {};
+      if (!result.client) result.client = label(details.client_name);
+      if (!result.advisor) result.advisor = label(details.advisor_name);
+    });
+    if (!result.advisor && current && current.extra) result.advisor = label(current.extra.advisor_name);
+    return result;
+  }
   function notificationsDialog() {
     if (document.getElementById('notifications-dialog')) return;
     var opener = document.activeElement; var session = liveSession;
@@ -1262,9 +1277,12 @@
       unreadFilter.setAttribute('aria-pressed', String(!showAll)); allFilter.setAttribute('aria-pressed', String(showAll));
       var visible = live.items.filter(function (item) { return showAll || !item.read; });
       visible.forEach(function (item) {
+        var identity = notificationIdentity(item);
         var mark = h('button', { class: 'btn secondary', type: 'button', text: item.read ? 'Read' : 'Mark as read', disabled: !!item.read });
         var row = h('article', { class: 'notification-item' + (item.read ? ' is-read' : '') },
           h('div', { class: 'notification-heading' }, ['RGAB', 'RGOS'].indexOf(item.company) >= 0 ? companyBadge(item.company) : null, h('h3', { text: LIVE_LABELS[item.event] || 'Interview updated' })),
+          h('p', { class: 'notification-identity', text: identity.client || 'Details available in interview' }),
+          identity.advisor ? h('p', { class: 'note notification-advisor', text: 'Assigned advisor/counselor: ' + identity.advisor }) : null,
           h('p', { class: 'note', text: Number.isFinite(Date.parse(item.at)) ? new Date(item.at).toLocaleString('en-GB', { timeZone: TZ }) + ' Dubai time' : 'Recent interview update' }),
           Number.isFinite(Date.parse(item.start)) ? h('p', { class: 'note', text: 'Appointment: ' + fmtDay(localDate(item.start)) + ' at ' + localTime(item.start) + ' Dubai time' }) : null,
           item.event === 'not_completed' ? h('p', { class: 'notification-explanation', text: INCOMPLETE_EXPLANATION }) : null,
