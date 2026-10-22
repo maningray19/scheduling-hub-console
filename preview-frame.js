@@ -17,18 +17,23 @@
       });
     });
   }
-  function tell() { try { parent.postMessage({ h: Math.ceil(document.documentElement.scrollHeight) }, '*'); } catch (e) { /* no parent */ } }
+  function tell() { try { parent.postMessage({ preview: 'rendered', h: Math.ceil(document.documentElement.scrollHeight) }, '*'); } catch (e) { /* no parent */ } }
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent) return;
-    var d = e.data; if (!d || typeof d.html !== 'string' || d.html.length > 400000) return;
+    var d = e.data; if (!d || typeof d.html !== 'string') return;
+    if (!d.html.trim() || d.html.length > 400000) { parent.postMessage({ preview: 'error' }, '*'); return; }
+    try {
     // first remove scripts and event handlers from the text itself, so nothing even tries to run while it is being read
     var text = d.html.replace(RE_SCRIPT, '').replace(RE_HANDLER, '');
     var doc = new DOMParser().parseFromString(text, 'text/html'); clean(doc);
     Array.prototype.slice.call(document.head.querySelectorAll('style')).forEach(function (s) { s.remove(); });
     Array.prototype.slice.call(doc.querySelectorAll('style')).forEach(function (s) { document.head.appendChild(document.importNode(s, true)); s.remove(); });
     document.body.textContent = '';
+    document.body.removeAttribute('style');
     if (doc.body && doc.body.getAttribute('style')) document.body.setAttribute('style', doc.body.getAttribute('style'));
     Array.prototype.slice.call(doc.body ? doc.body.childNodes : []).forEach(function (n) { document.body.appendChild(document.importNode(n, true)); });
     tell(); setTimeout(tell, 300);
+    } catch (error) { parent.postMessage({ preview: 'error' }, '*'); }
   });
+  parent.postMessage({ preview: 'ready' }, '*');
 })();

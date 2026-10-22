@@ -43,8 +43,11 @@
     if (method !== 'GET') opts.headers['x-pic-csrf'] = '1';
     if (base) { var tk = getToken(); if (tk) opts.headers.authorization = 'Bearer ' + tk; }
     if (body !== undefined) { opts.headers['content-type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    var controller = new AbortController(); var expired = false;
+    opts.signal = controller.signal;
+    var timer = setTimeout(function () { expired = true; controller.abort(); }, method === 'GET' ? 25000 : 45000);
     return fetch(base + path, opts).then(function (r) {
-      return r.json().catch(function () { return null; }).then(function (j) {
+      return r.json().catch(function (e) { if (expired) throw e; return null; }).then(function (j) {
         if (r.ok && toastFor(method, path)) toast(toastFor(method, path));
         if (j && j.token && (path === '/ui/api/login' || path === '/ui/api/login-sso') && base) setToken(j.token);
         if (path === '/ui/api/logout' && base) setToken(null);
@@ -52,7 +55,12 @@
         if (!r.ok) { var e = new Error((j && j.error && j.error.message) || 'Request failed'); e.code = j && j.error && j.error.code; e.status = r.status; throw e; }
         return j;
       });
-    });
+    }).catch(function (e) {
+      if (expired || (e && e.name === 'AbortError')) { var timeout = new Error(method === 'GET' ? 'This is taking too long. Check your connection and press Retry or Refresh.' : 'The response took too long. The change may have reached the company. Refresh and check its status before trying again.'); timeout.code = 'request_timeout'; throw timeout; }
+      if (e && e.status) throw e;
+      if (e instanceof TypeError) { var network = new Error(method === 'GET' ? 'The connection was interrupted. Check your connection and press Retry or Refresh.' : 'The connection was interrupted. The change may have reached the company. Refresh and check its status before trying again.'); network.code = 'network_error'; throw network; }
+      throw e;
+    }).finally(function () { clearTimeout(timer); });
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function todayDubai() { return new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10); }
@@ -72,7 +80,7 @@
   // ------------------------------------------------------------ data
   // Smooth clicks: every menu click first redraws at once from what is already known (the company filter and the menus work on the loaded list, never on the network),
   // then fresh data is fetched quietly and the screen is redrawn when it arrives. Calendar ranges are cached (a bigger cached range also serves a smaller one) and the next/previous range is fetched ahead.
-  var calCache = []; var resCache = {};
+  var calCache = []; var resCache = {}; var calPending = {};
   function rangeFor(d, view) {
     d = d || state.date; view = view || state.view;
     if (view === 'day') return [d, addDays(d, 1)];
@@ -87,11 +95,14 @@
   }
   function calFetch(r) {
     var f = Date.parse(isoStart(r[0])), t = Date.parse(isoStart(r[1]));
-    return api('GET', (limited() ? '/ui/api/interviewer/calendar' : '/ui/api/calendar') + '?from=' + encodeURIComponent(isoStart(r[0])) + '&to=' + encodeURIComponent(isoStart(r[1]))).then(function (j) {
+    var key = (limited() ? 'interviewer:' : 'full:') + f + ':' + t;
+    if (calPending[key]) return calPending[key];
+    calPending[key] = api('GET', (limited() ? '/ui/api/interviewer/calendar' : '/ui/api/calendar') + '?from=' + encodeURIComponent(isoStart(r[0])) + '&to=' + encodeURIComponent(isoStart(r[1]))).then(function (j) {
       calCache = calCache.filter(function (e) { return !(e.from === f && e.to === t); }); calCache.push({ from: f, to: t, items: j.items, at: Date.now() });
       if (calCache.length > 12) calCache.shift();
       return j.items;
-    });
+    }).finally(function () { delete calPending[key]; });
+    return calPending[key];
   }
   function loadCalendar(force) {
     if (state.tab !== 'calendar') return Promise.resolve();
@@ -100,12 +111,12 @@
     return calFetch(r).then(function () {
       var now = rangeFor(); if (isoStart(now[0]) + '|' + isoStart(now[1]) === key && state.tab === 'calendar') { state.items = (calLookup(r) || { items: [] }).items; state.error = null; state.calLoading = false; }
       setTimeout(prefetchCalendar, 400);
-    }).catch(function (e) { state.error = e.message; state.calLoading = false; });
+    }).catch(function (e) { var now = rangeFor(); if (state.tab === 'calendar' && isoStart(now[0]) + '|' + isoStart(now[1]) === key) { state.error = e.message; state.calLoading = false; } });
   }
   function prefetchCalendar() {
-    if (state.tab !== 'calendar' || !state.user) return;
+    if (state.tab !== 'calendar' || !state.user || state.drawer || document.visibilityState !== 'visible' || (navigator.connection && navigator.connection.saveData)) return;
     var step = state.view === 'day' ? 1 : state.view === 'week' ? 7 : 30;
-    [step, -step].forEach(function (n) {
+    [step].forEach(function (n) {
       var d = state.view === 'month' ? shiftMonth(n > 0 ? 1 : -1) : addDays(state.date, n); var r = rangeFor(d, state.view);
       if (!calLookup(r)) calFetch(r).catch(function () {});
     });
@@ -113,7 +124,7 @@
   function loadWide() {
     var from = addDays(todayDubai(), -30), to = addDays(todayDubai(), 62);
     return api('GET', '/ui/api/calendar?from=' + encodeURIComponent(isoStart(from)) + '&to=' + encodeURIComponent(isoStart(to)))
-      .then(function (j) { state.wide = j.items; state.error = null; }).catch(function (e) { state.error = e.message; });
+      .then(function (j) { state.wide = j.items; if (state.tab === 'queues') state.error = null; }).catch(function (e) { if (state.tab === 'queues') state.error = e.message; });
   }
   function resKey() { var rr = resRange(); return '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); }
   // what can be shown immediately for the current tab (called right after a click, before any network)
@@ -553,11 +564,47 @@
       var dlg = h('dialog', { class: 'ask-dialog' }, body); dlg.addEventListener('close', function () { finish(null); }); document.body.appendChild(dlg); dlg.showModal();
     });
   }
+  function workflowModel(b, dr) {
+    var d = b.details || {}; var x = dr.extra || {}; var ws = dr.workspace || {}; var mail = ws.result_email || {};
+    var labels = [['Job position', d.job_position || x.job_position], ['Program applied', d.program_applied], ['Country applied', d.country_applied], ['Salary', d.salary], ['Nationality', d.nationality]];
+    var missing = labels.filter(function (r) { return !r[1]; }).map(function (r) { return r[0]; });
+    var ranks = { none: 0, draft: 1, submitted: 2, awaiting_advisor: 3, approved: 4, released: 5 }; var rank = ranks[b.assessment_status] || 0;
+    var stopped = b.status === 'cancelled' || b.status === 'no_show'; var completed = b.status === 'completed';
+    var who = b.company === 'RGAB' ? 'Counselor' : 'Advisor';
+    var emailState = String(mail.state || '').toLowerCase();
+    var sent = ['sent', 'delivered', 'opened', 'accepted', 'rejected'].indexOf(emailState) >= 0;
+    var scheduled = ['scheduled', 'queued', 'pending'].indexOf(emailState) >= 0;
+    var emailText = mail.label || (rank === 5 ? 'Released to ' + b.company + '. Sending and delivery have not been confirmed here.' : 'The company supplies the sending schedule after the result is ready.');
+    if (mail.scheduled_for && !isNaN(Date.parse(mail.scheduled_for))) emailText += ' Scheduled: ' + localDate(mail.scheduled_for) + ' ' + localTime(mail.scheduled_for) + ' Dubai.';
+    return { missing: missing, stopped: stopped, steps: [
+      { title: 'Check client and booking details', status: missing.length ? 'needs attention' : 'details available', text: missing.length ? 'Ask ' + b.company + ' to check: ' + missing.join(', ') + '. Do not guess or copy details from another booking.' : 'Check these details against the booking before continuing.' },
+      { title: 'Hold the interview', status: completed ? 'done' : stopped ? 'stopped' : 'next', text: stopped ? 'This interview is ' + statusLabel(b.status) + '. Do not create or release another result for it.' : completed ? 'The interview is marked completed.' : 'After the interview finishes, press Mark interview completed. If the client did not attend, use Mark no-show.' },
+      { title: 'Record and submit the assessment', status: rank >= 2 ? 'done' : completed && !stopped ? 'next' : 'waiting', text: dr.grading && dr.grading.supports_draft === false ? 'Enter the grades and required note, then submit. This company does not offer a separate draft step.' : 'Enter the grades and required note, save the draft, check it, then submit. If grading is not offered here, complete it in the company Interview Workspace.' },
+      { title: 'Get ' + who + ' confirmation', status: stopped ? 'stopped' : rank >= 4 ? 'done' : rank === 3 ? 'waiting for ' + who : rank === 2 ? 'next' : 'waiting', text: 'Send the submitted assessment to the owning ' + who + '. Wait for the company to confirm; correct any reported error in the company system.' },
+      { title: 'Check the result design and release once', status: rank === 5 ? 'released' : stopped ? 'stopped' : rank === 4 ? 'next' : 'waiting', text: 'Open the result preview and check the recipient, company and design. Release only when the company allows it. A summary without the design is not a design preview.' },
+      { title: 'Check the sending schedule and delivery', status: sent ? 'company reports ' + emailState : scheduled ? 'scheduled, not sent' : emailState === 'failed' || emailState === 'bounced' ? 'needs attention' : 'awaiting company report', text: emailText + ' Released, scheduled, sent and delivered are separate stages. Use the available sending controls below; do not release again to check progress.' }
+    ] };
+  }
+  function workflowCard(b, dr) {
+    var model = workflowModel(b, dr);
+    return h('section', { class: 'card interview-workflow', 'aria-label': 'Step-by-step interview workflow' },
+      h('h3', { text: 'Aira\'s step-by-step workflow' }),
+      h('p', { class: 'note', text: 'Follow this interview in ' + b.company + '. Status comes from the company and the recorded interview; reading this guide does not complete a step.' }),
+      model.missing.length ? h('p', { class: 'workflow-warning', role: 'status', text: (dr.pending > 0 ? 'Still checking details. ' : 'Details need checking. ') + 'Missing: ' + model.missing.join(', ') + '. Ask ' + b.company + ' to complete its existing source record, then refresh details.' }) : null,
+      h('ol', { class: 'workflow-steps' }, model.steps.map(function (step) { return h('li', null, h('div', { class: 'workflow-step-heading' }, h('strong', { text: step.title }), h('span', { class: 'chip', text: step.status })), h('p', { class: 'note', text: step.text })); })));
+  }
   function workspaceCard(b, dr, msg) {
-    var ws = dr.workspace; if (!ws || !ws.actions || !ws.actions.length) return null;
-    return h('div', { class: 'card workspace' }, h('h3', { text: 'More functions from ' + b.company }),
-      ws.result_email && ws.result_email.label ? h('p', { class: 'note', text: 'Result e-mail: ' + ws.result_email.label }) : null,
-      h('div', { class: 'actions' }, ws.actions.map(function (a) {
+    var ws = dr.workspace; if (!ws) return null;
+    var actions = Array.isArray(ws.actions) ? ws.actions : []; var mail = ws.result_email;
+    if (!actions.length && !mail) return null;
+    var sending = actions.filter(function (a) { return /result|email|requeue/.test(a.id); });
+    var other = actions.filter(function (a) { return sending.indexOf(a) < 0; });
+    return h('div', { class: 'card workspace' }, h('h3', { text: 'Sending schedule and company functions' }),
+      mail ? h('div', { class: 'mail-status', role: 'status' }, h('strong', { text: 'Result e-mail: ' + (mail.label || mail.state || 'Awaiting company report') }),
+        mail.scheduled_for && !isNaN(Date.parse(mail.scheduled_for)) ? h('p', { text: 'Scheduled for ' + localDate(mail.scheduled_for) + ' at ' + localTime(mail.scheduled_for) + ' Dubai time.' }) : null,
+        h('p', { class: 'note', text: 'Release hands the result to ' + b.company + '. A scheduled result has not been sent yet. Check Results sent for the company\'s sending and delivery reports.' })) : null,
+      !sending.length ? h('p', { class: 'note', text: b.company + ' is not offering a change to the sending schedule for this interview and account right now.' }) : h('h4', { text: 'Sending controls' }),
+      h('div', { class: 'actions' }, sending.concat(other).map(function (a) {
         return h('button', { class: 'btn secondary', type: 'button', 'data-ws': a.id, text: a.label, onclick: function () {
           askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label, bookingId: b.id }).then(function (params) {
             if (!params) return; msg.className = 'err'; msg.textContent = '';
@@ -755,46 +802,52 @@
 
   // ------------------------------------------------------------ drawer
   function openDrawer(id) {
-    state.drawer = { id: id, loading: true }; renderMain();
-    api('GET', limited() ? '/ui/api/interviewer/interview/' + id : '/ui/api/booking/' + id).then(function (b) {
-      state.drawer = { id: id, b: b }; renderMain();
+    var dr = { id: id, loading: true }; state.drawer = dr; renderMain();
+    return api('GET', limited() ? '/ui/api/interviewer/interview/' + id : '/ui/api/booking/' + id).then(function (b) {
+      if (state.drawer !== dr) return;
+      dr.loading = false; dr.b = b; renderMain();
       if (limited()) return;
       loadDrawerExtras(id, b);
-    }).catch(function (e) { state.drawer = { id: id, error: e.message }; renderMain(); });
+    }).catch(function (e) { if (state.drawer !== dr) return; dr.loading = false; dr.error = e.message; renderMain(); });
   }
   // redraws the open interview card without wiping what is being typed
   function softRender() { if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.closest && document.activeElement.closest('.drawer')) return; renderMain(); }
   // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
   function loadDrawerExtras(id, b, quiet) {
+      var dr = state.drawer; if (!dr || dr.id !== id || dr.extrasLoading) return Promise.resolve();
+      dr.extrasLoading = true; var previousErrors = JSON.stringify(dr.loadErrors || {}); dr.loadErrors = {};
       var isFacRole = state.user && (state.user.role === 'facilitator' || state.user.role === 'approver');
       var live = ['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b); var nreq = (live ? 1 : 0) + (isFacRole && !isHistory(b) ? 1 : 0) + (isFacRole && b.company === 'RGAB' && !isHistory(b) ? 1 : 0);
-      if (state.drawer && state.drawer.id === id) state.drawer.pending = quiet ? 0 : nreq;
-      var settle = function () { if (state.drawer && state.drawer.id === id && state.drawer.pending > 0) { state.drawer.pending -= 1; if (state.drawer.pending === 0) softRender(); } };
+      dr.pending = quiet ? 0 : nreq; var remaining = nreq;
+      var settle = function () { remaining -= 1; if (state.drawer !== dr) return; if (dr.pending > 0) dr.pending -= 1; if (remaining <= 0) { dr.extrasLoading = false; if (!quiet || previousErrors !== JSON.stringify(dr.loadErrors)) softRender(); } };
+      var failed = function (part, e) { if (state.drawer === dr) dr.loadErrors[part] = e.message || 'Could not load. Press Retry.'; };
+      if (!nreq) dr.extrasLoading = false;
       // if the company offers a grading form for this interview (addendum 0.3.7), show it
       if (['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) {
-        if (!(state.drawer && state.drawer.id === id && p)) return; var changed = false; var x = state.drawer.extra = state.drawer.extra || {};
+        if (!(state.drawer === dr && p)) return; var changed = false; var x = state.drawer.extra = state.drawer.extra || {};
         if (p.job_position && x.job_position !== p.job_position) { x.job_position = p.job_position; changed = true; } if (p.advisor_name && x.advisor_name !== p.advisor_name) { x.advisor_name = p.advisor_name; changed = true; }
         if (typeof p.to === 'string' && p.to.indexOf('@') > 0 && !p.placeholder && x.client_email !== p.to) { x.client_email = p.to; changed = true; }
         if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria) && !state.drawer.grading) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
-        if (p.workspace && p.workspace.actions && p.workspace.actions.length && JSON.stringify(state.drawer.workspace) !== JSON.stringify(p.workspace)) { state.drawer.workspace = p.workspace; changed = true; }
+        var workspace = p.workspace && typeof p.workspace === 'object' && Array.isArray(p.workspace.actions) ? p.workspace : null;
+        if (JSON.stringify(dr.workspace || null) !== JSON.stringify(workspace)) { dr.workspace = workspace; changed = true; }
         if (p.branding && p.branding.name && x.branding !== p.branding.name) { x.branding = p.branding.name; changed = true; }
         if (changed) softRender();
-      }).catch(function () {}).then(settle);
+      }).catch(function (e) { failed('preview', e); }).then(settle);
       if (isFacRole && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
-        if (!(state.drawer && state.drawer.id === id)) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
+        if (state.drawer !== dr) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
         var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; if (x.docs !== txt) { x.docs = txt; softRender(); }
-      }).catch(function () {}).then(settle);
+      }).catch(function (e) { failed('documents', e); }).then(settle);
       if (isFacRole && b.company === 'RGAB' && !isHistory(b)) api('GET', '/ui/api/lists/confirmations?company=RGAB').then(function (r) {
-        if (!(state.drawer && state.drawer.id === id)) return; var sec = (r.sections || [])[0]; var row = sec && (sec.rows || []).filter(function (q) { return q.booking_id === id; })[0]; if (!row) return;
+        if (state.drawer !== dr) return; var sec = (r.sections || [])[0]; if (sec && sec.error) { failed('confirmations', new Error(sec.code === 'outside_hours' ? 'Confirmation details are available from 10:00 AM to 10:00 PM Dubai time.' : 'The company could not supply confirmation details. Press Retry.')); return; } var row = sec && (sec.rows || []).filter(function (q) { return q.booking_id === id; })[0]; if (!row) return;
         var x = state.drawer.extra = state.drawer.extra || {}; var st = row.cells && row.cells.state; if (st && x.confirmation !== st) { x.confirmation = st; softRender(); }
-      }).catch(function () {}).then(settle);
+      }).catch(function (e) { failed('confirmations', e); }).then(settle);
   }
   function drawerEl() {
     var dr = state.drawer; if (!dr) return null;
     var close = h('button', { class: 'btn secondary', type: 'button', text: 'Close', id: 'drawer-close', onclick: function () { state.drawer = null; renderMain(); } });
     var box = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Interview details' }, close);
     if (dr.loading) { box.appendChild(h('p', { text: 'Loading...' })); return box; }
-    if (dr.error) { box.appendChild(h('p', { class: 'err', text: dr.error })); return box; }
+    if (dr.error) { box.appendChild(h('p', { class: 'err', role: 'alert', text: dr.error })); box.appendChild(h('button', { class: 'btn secondary', type: 'button', text: 'Retry interview details', onclick: function () { openDrawer(dr.id); } })); return box; }
     if (limited()) return limitedDrawer(box, dr);
     var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var dash = dr.pending > 0 ? 'Loading...' : '-'; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
@@ -809,7 +862,12 @@
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { class: r[2] ? 'missing' : '', text: r[2] ? 'MISSING - ' + b.company + ' has not sent the program applied' : r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
     if (isFac && !isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
-    var msg = h('p', { class: 'err', id: 'drawermsg' });
+    var msg = h('p', { class: 'err', id: 'drawermsg', role: 'alert' });
+    if (isFac && !isHistory(b)) box.appendChild(workflowCard(b, dr));
+    if (dr.loadErrors && Object.keys(dr.loadErrors).length) box.appendChild(h('div', { class: 'workflow-warning', role: 'status' },
+      h('strong', { text: 'Some company details could not be checked' }),
+      Object.keys(dr.loadErrors).map(function (key) { return h('p', { text: key + ': ' + dr.loadErrors[key] }); })));
+    box.appendChild(h('button', { class: 'btn secondary', type: 'button', text: 'Refresh company details', onclick: function () { openDrawer(b.id); } }));
     function run(action) {
       var payload = { action: action };
       if (dr.grading && (action === 'save_draft' || action === 'submit')) {
@@ -843,12 +901,12 @@
       var done = b.status === 'completed'; var sched = b.status === 'confirmed'; var adv = b.company === 'RGAB' ? 'Counselor' : 'advisor';
       var as = b.assessment_status; var nextStep = b.status === 'cancelled' || b.status === 'no_show' ? 'This interview was ' + (b.status === 'no_show' ? 'marked no-show' : 'cancelled') + '. Nothing more to press.'
         : sched ? 'Next step: when the interview is over, press "Mark interview completed" (or "Mark no-show"). The other buttons stay grey until then.'
-        : as === 'none' ? 'Next step: enter the grades (and a note), then press "Save assessment draft". "Submit assessment" turns on after the draft is saved.'
+        : as === 'none' ? (dr.grading && dr.grading.supports_draft === false ? 'Next step: enter the grades and required note, then press "Submit assessment". This company does not use a separate draft step.' : 'Next step: enter the grades (and a note), then press "Save assessment draft". "Submit assessment" turns on after the draft is saved.')
         : as === 'draft' ? 'Next step: check the grades and the note, then press "Submit assessment". "Send to ' + adv + ' for confirmation" turns on after you submit.'
         : as === 'submitted' ? 'Next step: press "Send to ' + adv + ' for confirmation".'
         : as === 'awaiting_advisor' ? 'Sent. Now waiting for the ' + adv + ' to confirm. Nothing to press until the ' + adv + ' answers; "Release result" turns on after that.'
         : as === 'approved' ? 'The ' + adv + ' confirmed. Next step: press "Release result".'
-        : as === 'released' ? 'The result was released. Done.' : '';
+        : as === 'released' ? 'The result was released to ' + b.company + '. Check the sending schedule below and Results sent for sending and delivery reports. Do not release it again.' : '';
       nextAction = sched ? 'complete_interview' : as === 'none' ? (dr.grading && dr.grading.supports_draft === false ? 'submit' : 'save_draft') : as === 'draft' ? 'submit' : as === 'submitted' ? 'request_advisor_confirmation' : as === 'approved' ? 'release' : '';
       if (nextStep) box.appendChild(h('p', { class: 'nextstep', role: 'status', text: nextStep }));
       if (isFac && !isHistory(b)) box.appendChild(h('p', { class: 'note legend', text: 'Green outline = press this one now. Dashed grey with a lock = not available yet.' }));
@@ -868,19 +926,42 @@
   }
   // Tolerant of what each company's system returns: missing fields show a dash; "brand_matches_company" blocks only when a company says false.
   function brandOk(p) { return !p.template || p.template.brand_matches_company !== false; }
+  function disposePreviews(box) {
+    Array.prototype.forEach.call(box.querySelectorAll('iframe.previewframe'), function (fr) { if (fr.__disposePreview) fr.__disposePreview(); });
+  }
   function previewBlock(p) {
-    if (typeof p.html === 'string' && p.html) {   // the company's real design, in a sandboxed frame (nothing in it can run, open or load from outside)
-      var fr = h('iframe', { class: 'previewframe', src: 'preview-frame.html', sandbox: 'allow-scripts', title: 'The result e-mail as it will be sent' });
-      fr.addEventListener('load', function () { try { fr.contentWindow.postMessage({ html: p.html }, '*'); } catch (e) { /* frame gone */ } });
-      window.addEventListener('message', function (ev) { if (ev.source === fr.contentWindow && ev.data && typeof ev.data.h === 'number') fr.style.height = Math.min(Math.max(ev.data.h + 8, 160), 1600) + 'px'; });
+    if (typeof p.html === 'string' && p.html.trim() && p.html.length <= 400000) {   // company HTML stays inside the isolated, network-blocked frame
+      var status = h('p', { class: 'note', role: 'status', text: 'Loading the result e-mail design...' });
+      var fr = h('iframe', { class: 'previewframe', src: 'preview-frame.html?v=20261022', sandbox: 'allow-scripts', title: 'The result e-mail as it will be sent' });
+      var timer; var disposed = false;
+      var retry = h('button', { class: 'btn secondary', type: 'button', text: 'Retry design', hidden: true, onclick: function () {
+        status.className = 'note'; status.textContent = 'Loading the result e-mail design...'; retry.hidden = true;
+        fr.src = 'preview-frame.html?v=20261022&retry=' + Date.now(); arm();
+      } });
+      function fail() { status.className = 'err'; status.textContent = 'The design could not be displayed. Retry the design; nothing has been sent.'; retry.hidden = false; }
+      function arm() { clearTimeout(timer); timer = setTimeout(function () { if (!disposed) fail(); }, 10000); }
+      function send() { try { fr.contentWindow.postMessage({ html: p.html }, '*'); } catch (e) { fail(); } }
+      function receive(ev) {
+        if (disposed || ev.source !== fr.contentWindow || !ev.data) return;
+        if (ev.data.preview === 'ready') send();
+        if (ev.data.preview === 'error') { clearTimeout(timer); fail(); }
+        if (typeof ev.data.h === 'number' && isFinite(ev.data.h)) {
+          fr.style.height = Math.min(Math.max(ev.data.h + 8, 160), 1600) + 'px'; clearTimeout(timer);
+          status.className = 'note'; status.textContent = 'Result e-mail design loaded. Preview only; nothing has been sent.'; retry.hidden = true;
+        }
+      }
+      fr.addEventListener('load', function () { if (!disposed) { arm(); send(); } });
+      fr.addEventListener('error', fail); window.addEventListener('message', receive); arm();
+      fr.__disposePreview = function () { disposed = true; clearTimeout(timer); window.removeEventListener('message', receive); };
       return h('div', { class: 'brandbox brand-' + p.company },
         h('dl', { class: 'kv' }, h('dt', { text: 'From' }), h('dd', { text: p.from || '-' }), h('dt', { text: 'To' }), h('dd', { text: p.to || '-' }), h('dt', { text: 'Subject' }), h('dd', { text: p.subject || '-' })),
-        fr, h('p', { class: 'note', text: [(p.branding || {}).signature, p.delivery].filter(Boolean).join(' | ') }),
+        status, retry, fr, h('p', { class: 'note', text: [(p.branding || {}).signature, p.delivery].filter(Boolean).join(' | ') }),
         brandOk(p) ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
     }
     var tpl = p.template || {}; var br = p.branding || {}; var secs = Array.isArray(p.sections) ? p.sections : [];
     var empty = !secs.length && !tpl.label && !tpl.id;
     return h('div', { class: 'brandbox brand-' + p.company },
+      h('p', { class: 'err preview-unavailable', role: 'status', text: 'Result e-mail design unavailable: ' + p.company + ' has not supplied a displayable design for this interview. The information below is an assessment summary, not the e-mail design. Ask ' + p.company + ' to check its result preview.' }),
       h('div', { class: 'brandhead' }, h('strong', { text: br.name || p.company }), br.letterhead && br.letterhead !== br.name ? h('span', { text: ' ' + br.letterhead }) : null),
       h('dl', { class: 'kv' },
         h('dt', { text: 'From' }), h('dd', { text: p.from || '-' }), h('dt', { text: 'To' }), h('dd', { text: p.to || '-' }),
@@ -927,11 +1008,23 @@
     });
   }
   function showPreview(b, msg) {
-    api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
-      var dlg = h('dialog', { id: 'preview-dialog' }, h('h3', { text: 'Assessment form preview - ' + p.company + ' branding only' }), previewBlock(p),
-        h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', text: 'Close', onclick: function () { dlg.close(); } })));
-      document.body.appendChild(dlg); dlg.addEventListener('close', function () { dlg.remove(); }); dlg.showModal();
-    }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+    if (document.getElementById('preview-dialog')) return;
+    var content = h('div'); var closed = false; var request = 0;
+    var reload = h('button', { class: 'btn secondary', type: 'button', text: 'Reload preview', onclick: load });
+    var dlg = h('dialog', { id: 'preview-dialog' }, h('h3', { text: 'Result e-mail preview - ' + b.company }), content,
+      h('div', { class: 'actions' }, reload, h('button', { class: 'btn secondary', type: 'button', text: 'Close', onclick: function () { dlg.close(); } })));
+    function load() {
+      var current = ++request; disposePreviews(content); content.textContent = '';
+      content.appendChild(h('p', { class: 'note', role: 'status', text: 'Requesting the result preview from ' + b.company + '...' })); reload.disabled = true;
+      api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
+        if (closed || current !== request) return;
+        content.textContent = ''; content.appendChild(previewBlock(p));
+      }).catch(function (x) {
+        if (closed || current !== request) return;
+        content.textContent = ''; content.appendChild(h('p', { class: 'err', role: 'alert', text: 'The preview could not be loaded. ' + x.message + ' Use Reload preview to try again. Nothing has been sent.' }));
+      }).finally(function () { if (!closed && current === request) reload.disabled = false; });
+    }
+    document.body.appendChild(dlg); dlg.addEventListener('close', function () { closed = true; disposePreviews(content); dlg.remove(); }); dlg.showModal(); load();
   }
   // Warning before the assessment details go to the advisor: it names the company and the advisor, and says nothing reaches the other company.
   function confirmAdvisor(b, d, go) {
@@ -947,11 +1040,11 @@
   function confirmRelease(b, msg) {
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
       var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p),
-        h('p', { text: 'It is sent once, only through ' + p.company + ', with ' + p.company + ' branding. Recipient, template and branding are validated by that company first.' }),
+        h('p', { text: 'Release asks ' + p.company + ' to process this result using its own checks and sending schedule. A recorded release does not prove the e-mail was sent or delivered. Recipient, template and branding are validated by that company.' }),
         h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p), text: 'Yes, release', onclick: function () {
-          dlg.close(); api('POST', '/ui/api/booking/' + b.id + '/release', {}).then(function (r) { msg.className = 'ok'; msg.textContent = 'Sent as ' + r.branding + ' to ' + r.sent_to + ' (' + (r.delivery || '') + ')'; return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
+          dlg.close(); api('POST', '/ui/api/booking/' + b.id + '/release', {}).then(function (r) { msg.className = 'ok'; msg.textContent = 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
         } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
-      document.body.appendChild(dlg); dlg.addEventListener('close', function () { dlg.remove(); }); dlg.showModal();
+      document.body.appendChild(dlg); dlg.addEventListener('close', function () { disposePreviews(dlg); dlg.remove(); }); dlg.showModal();
     }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
   }
 
@@ -1027,6 +1120,7 @@
     var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'notices' ? noticesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     var nb = noticesBar(); if (nb) m.appendChild(nb);
+    if (state.error) m.appendChild(h('div', { class: 'notice', role: 'alert' }, ['calendar', 'queues', 'results'].indexOf(state.tab) < 0 ? h('p', { text: state.error }) : null, h('button', { class: 'btn secondary', type: 'button', text: 'Retry loading', onclick: function () { refreshTab(); } })));
     var oldGate = document.querySelector('.gate'); if (oldGate) oldGate.remove(); var gate = gateOverlay(); if (gate) { document.body.appendChild(gate); setTimeout(gate.__check, 30); }
     m.appendChild(body); var d = drawerEl(); if (d) m.appendChild(d);
     document.querySelectorAll('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === state.tab)); });
@@ -1037,13 +1131,16 @@
     root.appendChild(mainShell()); renderMain();
   }
   function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll, state.tabData.list_confirmations, state.tabData.list_offers]); }
+  var refreshGeneration = 0;
   function refreshTab(quiet) {
+    var generation = quiet ? refreshGeneration : ++refreshGeneration;
+    if (!quiet) state.error = null;
     var before = quiet ? snap() : null; var t = state.tab; var jobs = []; loadNotices();   // notices load on their own and never hold a screen back
     var rng = encodeURIComponent(isoStart(addDays(todayDubai(), -30))) + '&to=' + encodeURIComponent(isoStart(addDays(todayDubai(), 62)));
     if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); if (!limited()) jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
-    if (t === 'confirmations' || t === 'offers') jobs.push(api('GET', '/ui/api/lists/' + t + (state.company ? '?company=' + state.company : '')).then(function (x) { state.tabData['list_' + t] = x; }).catch(function () {}));
-    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (rq === resKey()) state.tabData.results = x; state.error = ''; }).catch(function (e) { state.error = e.message || 'Could not load.'; })); }
+    if (t === 'confirmations' || t === 'offers') jobs.push(api('GET', '/ui/api/lists/' + t + (state.company ? '?company=' + state.company : '')).then(function (x) { state.tabData['list_' + t] = x; }).catch(function (e) { if (state.tab === t && generation === refreshGeneration) state.error = e.message; }));
+    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (state.tab === t && generation === refreshGeneration && rq === resKey()) { state.tabData.results = x; state.error = ''; } }).catch(function (e) { if (state.tab === t && generation === refreshGeneration && rq === resKey()) state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
@@ -1053,7 +1150,7 @@
       jobs.push(api('GET', '/ui/api/report?from=' + rng).then(function (r) { state.tabData.report = r; }).catch(function () {}));
       jobs.push(api('GET', '/ui/api/notices?all=1').then(function (r) { state.tabData.noticesAll = r; }).catch(function () {}));
     }
-    return Promise.all(jobs).then(function () { if (quiet && snap() === before) return; renderMain(); });
+    return Promise.all(jobs).catch(function (e) { if (state.tab === t && generation === refreshGeneration) state.error = e.message; }).then(function () { if (state.tab !== t || generation !== refreshGeneration || !state.user) return; if (quiet && (snap() === before || document.querySelector('dialog[open]') || (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)))) return; if (quiet || state.drawer) softRender(); else renderMain(); });
   }
   function refreshAll() { return loadControls().then(function () { return refreshTab(); }).then(function () { var shell = document.querySelector('.banner'); if (state.user) { var scroll = window.scrollY; root.textContent = ''; root.appendChild(mainShell()); renderMain(); window.scrollTo(0, scroll); } }); }
   function refresh() {
@@ -1079,13 +1176,14 @@
   init();
   // Background refresh every 15 s: only on the data screens, never under a video or a form, and only redraws when something really changed (so a playing tutorial is never restarted).
   function quietDrawer() {
-    var dr = state.drawer; if (!dr || !dr.b || limited() || document.visibilityState !== 'visible') return;
+    var dr = state.drawer; if (!dr || !dr.b || dr.refreshing || dr.extrasLoading || limited() || document.visibilityState !== 'visible') return;
     if (document.querySelector('dialog[open]') || (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) return;
-    api('GET', '/ui/api/booking/' + dr.id).then(function (nb) {
-      if (!state.drawer || state.drawer.id !== dr.id) return; var changed = JSON.stringify(nb) !== JSON.stringify(state.drawer.b);
+    dr.refreshing = true;
+    return api('GET', '/ui/api/booking/' + dr.id).then(function (nb) {
+      if (state.drawer !== dr) return; var changed = JSON.stringify(nb) !== JSON.stringify(state.drawer.b);
       if (changed) { state.drawer.b = nb; softRender(); }
       loadDrawerExtras(dr.id, nb, true);
-    }).catch(function () {});
+    }).catch(function (e) { if (state.drawer === dr) { dr.loadErrors = dr.loadErrors || {}; dr.loadErrors.interview = e.message; softRender(); } }).finally(function () { dr.refreshing = false; });
   }
   // a new version of this page: noticed within a minute; reloaded by itself when nothing is being typed or played
   var pageSig = null; function sigOf(t) { var n = 0; for (var i = 0; i < t.length; i++) n = (n * 31 + t.charCodeAt(i)) | 0; return t.length + ':' + n; }
@@ -1098,12 +1196,13 @@
     }).catch(function () {});
   }
   checkVersion(); setInterval(checkVersion, 60000);
+  var backgroundBusy = false;
   setInterval(function () {
     if (state.user && state.drawer) { quietDrawer(); return; }
-    if (!state.user || state.drawer || document.visibilityState !== 'visible' || document.body.classList.contains('touring')) return;
+    if (!state.user || state.drawer || backgroundBusy || document.visibilityState !== 'visible' || document.body.classList.contains('touring') || document.querySelector('dialog[open]')) return;
     if (['calendar', 'queues', 'results', 'management'].indexOf(state.tab) < 0) return;
     if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    var before = JSON.stringify(state.controls);
-    loadControls().then(function () { if (JSON.stringify(state.controls) !== before) return refreshAll(); return refreshTab(true); }).catch(function () {});
+    var before = JSON.stringify(state.controls); backgroundBusy = true;
+    loadControls().then(function () { if (JSON.stringify(state.controls) !== before) return refreshAll(); return refreshTab(true); }).catch(function () {}).finally(function () { backgroundBusy = false; });
   }, 15000);
 })();

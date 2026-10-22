@@ -301,3 +301,12 @@ dialog::backdrop { background: #070b1699; backdrop-filter: blur(3px); }
 .btn.next, .btn.next:not(:disabled) { outline: 3px solid #16a34a; outline-offset: 2px; font-weight: 700; }
 .legend { margin: 4px 0 8px; }
 .kv dd.missing { color: #b91c1c; font-weight: 700; }
+.interview-workflow { margin-block: 16px; min-width: 0; }
+.workflow-warning { padding: 12px; border: 1px solid var(--warn); border-radius: 10px; background: var(--panel2); color: var(--fg); overflow-wrap: anywhere; }
+.workflow-steps { padding-left: 24px; margin-bottom: 0; }
+.workflow-steps li { padding: 8px 0 12px 4px; border-bottom: 1px solid var(--line); }
+.workflow-steps li:last-child { border-bottom: 0; }
+.workflow-step-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.workflow-steps p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.mail-status { padding: 12px; border-left: 4px solid var(--focus); background: var(--panel2); margin-block: 10px; overflow-wrap: anywhere; }
+.interview-workflow .chip { white-space: normal; }
