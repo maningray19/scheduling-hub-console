@@ -1232,10 +1232,18 @@
   }
   function confirmRelease(b, msg) {
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
-      var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p),
+      var rt = p.workspace && p.workspace.release_timing; var timing = null; var pick = null; var nowBox = null;
+      if (rt && rt.options && rt.options.length) {
+        var lab = function (n) { return n < 24 ? n + ' hours' : n === 24 ? '24 hours (1 day, standard)' : n % 24 === 0 ? (n / 24) + ' days' : n + ' hours'; };
+        pick = h('select', { id: 'release-hours', 'aria-label': 'Send the result to the client after' }, rt.options.map(function (n) { return h('option', { value: String(n), text: lab(n), selected: n === rt.default }); }));
+        nowBox = state.user.role === 'approver' && rt.send_now ? h('input', { type: 'checkbox', id: 'release-now', onchange: function (e) { pick.disabled = e.target.checked; } }) : null;
+        timing = h('div', { class: 'card' }, h('label', { for: 'release-hours', text: 'Send the result e-mail to the client after: ' }), pick, h('p', { class: 'note', text: 'The standard is 24 hours. The shortest is 3 hours and the longest is 5 days.' }),
+          nowBox ? h('label', null, nowBox, ' Send now (super admin only)') : null);
+      }
+      var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p), timing,
         h('p', { text: 'Release asks ' + p.company + ' to process this result using its own checks and sending schedule. A recorded release does not prove the e-mail was sent or delivered. Recipient, template and branding are validated by that company.' }),
         h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p), text: 'Yes, release', onclick: function () {
-          dlg.close(); api('POST', '/ui/api/booking/' + b.id + '/release', {}).then(function (r) { var pending = recordCompanyAction(b, 'release', r); msg.className = pending ? 'note' : 'ok'; msg.textContent = pending ? 'Company verification is pending. Refresh the current interview to check its status.' : 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); if (pending) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
+          dlg.close(); var rbody = {}; if (pick) { if (nowBox && nowBox.checked) rbody.send_now = true; else rbody.send_after_hours = parseInt(pick.value, 10); } api('POST', '/ui/api/booking/' + b.id + '/release', rbody).then(function (r) { var pending = recordCompanyAction(b, 'release', r); msg.className = pending ? 'note' : 'ok'; msg.textContent = pending ? 'Company verification is pending. Refresh the current interview to check its status.' : 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); if (pending) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
         } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
       document.body.appendChild(dlg); dlg.addEventListener('close', function () { disposePreviews(dlg); dlg.remove(); }); dlg.showModal();
     }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
