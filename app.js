@@ -571,6 +571,13 @@
       var finish = function (v) { if (done) return; done = true; dlg.close(); dlg.remove(); resolve(v); };
       var body = [h('h3', { text: o.title }), o.text ? h('p', { text: o.text }) : null];
       if (o.kind === 'confirm_reason') { field = h('textarea', { rows: '3', maxlength: '500', 'aria-label': o.reasonLabel || 'Reason' }); body.push(h('label', { text: o.reasonLabel || 'Reason' }), field); }
+      var mail1 = null; var mail2 = null;
+      if (o.kind === 'recipient') {
+        mail1 = h('input', { type: 'email', id: 'new-recipient', maxlength: '254', autocomplete: 'off', placeholder: 'New e-mail address', 'aria-label': 'New e-mail address' });
+        mail2 = h('input', { type: 'email', id: 'new-recipient2', maxlength: '254', autocomplete: 'off', placeholder: 'Type the new e-mail address again', 'aria-label': 'Type the new e-mail address again' });
+        field = h('input', { type: 'text', maxlength: '300', placeholder: o.reasonLabel || 'Why is the address changed?', 'aria-label': o.reasonLabel || 'Why is the address changed?' });
+        body.push(h('p', { class: 'note', text: 'Only the result e-mail that has not been sent yet goes to the new address. Check it letter by letter: a wrong address sends the result to a stranger.' }), mail1, mail2, field);
+      }
       if (o.kind === 'choice') { field = h('select', { 'aria-label': 'Choose' }, (o.choices || []).map(function (c) { return h('option', { value: String(c.value), text: c.label }); })); body.push(field); }
       if (o.kind === 'slot') {
         var slotBox = h('div', { class: 'slotbox' }, h('p', { class: 'note', text: 'Pick a day to see the free times.' }));
@@ -587,7 +594,14 @@
       }
       body.push(msg, h('div', { class: 'actions' },
         h('button', { class: 'btn', type: 'button', text: o.kind === 'confirm' ? 'Yes' : 'Confirm', onclick: function () {
-          if (o.kind === 'confirm_reason') { if (!field.value || field.value.trim().length < 3) { msg.textContent = 'Write a short reason.'; return; } finish({ reason: field.value.trim() }); }
+          if (o.kind === 'recipient') {
+            var e1 = mail1.value.trim().toLowerCase(); var e2 = mail2.value.trim().toLowerCase();
+            if (!/^[^\s@<>"',;()\[\]\\]{1,64}@[a-z0-9.-]{1,185}\.[a-z]{2,24}$/.test(e1)) { msg.textContent = 'That e-mail address is not valid.'; return; }
+            if (e1 !== e2) { msg.textContent = 'The two addresses are not the same. Type them again.'; return; }
+            if (!field.value || field.value.trim().length < 3) { msg.textContent = 'Write a short reason.'; return; }
+            finish({ email: e1, reason: field.value.trim() });
+          }
+          else if (o.kind === 'confirm_reason') { if (!field.value || field.value.trim().length < 3) { msg.textContent = 'Write a short reason.'; return; } finish({ reason: field.value.trim() }); }
           else if (o.kind === 'choice') { var c = (o.choices || []).filter(function (x) { return String(x.value) === field.value; })[0]; finish({ value: c ? c.value : field.value }); }
           else if (o.kind === 'slot') { if (!picked) { msg.textContent = 'Choose a time.'; return; } var sp = { start: picked.start, end: picked.end }; if (field && field.value.trim()) sp.reason = field.value.trim(); finish(sp); }
           else finish({});
@@ -1254,6 +1268,11 @@
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
       var rt = p.workspace && p.workspace.release_timing; var timing = null; var pick = null; var nowBox = null;
       var dupList = ((state.drawer && state.drawer.id === b.id && state.drawer.dups) || []).filter(function (x) { return x.status === 'completed' || x.status === 'confirmed'; });
+      var recAct = ((p.workspace && p.workspace.actions) || []).filter(function (a) { return a.id === 'change_recipient'; })[0]; var recBtn = null;
+      if (recAct) recBtn = h('button', { class: 'btn secondary', type: 'button', id: 'change-recipient-btn', text: recAct.label || 'Change recipient', onclick: function () {
+        askDialog({ title: recAct.label || 'Change recipient', text: recAct.confirm || '', kind: 'recipient', reasonLabel: recAct.reason_label, bookingId: b.id }).then(function (params) {
+          if (!params) return; return api('POST', '/ui/api/booking/' + b.id + '/action', { action: recAct.id, params: params }).then(function () { var old = document.getElementById('release-dialog'); if (old) { old.close(); old.remove(); } confirmRelease(b, msg); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+        }); } });
       var dupBox = dupList.length ? h('input', { type: 'checkbox', id: 'release-dup-ok', onchange: function (e) { var cb = document.getElementById('release-confirm'); if (cb) cb.disabled = !(e.target.checked && brandOk(p)); } }) : null;
       var dupNote = dupList.length ? h('div', { class: 'dupwarn' }, h('strong', { text: 'This client has another interview:' }), h('ul', null, dupList.map(function (x) { return h('li', { text: dupText(x) }); })), h('label', null, dupBox, ' I checked: this is NOT a second result for the same client.')) : null;
       if (rt && rt.options && rt.options.length) {
@@ -1263,7 +1282,7 @@
         timing = h('div', { class: 'card' }, h('label', { for: 'release-hours', text: 'Send the result e-mail to the client after: ' }), pick, h('p', { class: 'note', text: 'The standard is 24 hours. The shortest is 3 hours and the longest is 5 days.' }),
           nowBox ? h('label', null, nowBox, ' Send now (super admin only)') : null);
       }
-      var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p), dupNote, timing,
+      var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p), recBtn, dupNote, timing,
         h('p', { text: 'Release asks ' + p.company + ' to process this result using its own checks and sending schedule. A recorded release does not prove the e-mail was sent or delivered. Recipient, template and branding are validated by that company.' }),
         h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p) || !!dupBox, text: 'Yes, release', onclick: function () {
           dlg.close(); var rbody = {}; if (pick) { if (nowBox && nowBox.checked) rbody.send_now = true; else rbody.send_after_hours = parseInt(pick.value, 10); } api('POST', '/ui/api/booking/' + b.id + '/release', rbody).then(function (r) { var pending = recordCompanyAction(b, 'release', r); msg.className = pending ? 'note' : 'ok'; msg.textContent = pending ? 'Company verification is pending. Refresh the current interview to check its status.' : 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); if (pending) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
