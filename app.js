@@ -1025,13 +1025,14 @@
       dr.extrasLoading = true; var previousErrors = JSON.stringify(dr.loadErrors || {}); var documentError = dr.loadErrors && dr.loadErrors.documents;
       dr.loadErrors = quiet && documentError ? { documents: documentError } : {};
       var isFacRole = state.user && (state.user.role === 'facilitator' || state.user.role === 'approver');
-      var live = ['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b); var nreq = (live ? 1 : 0) + (isFacRole && !isHistory(b) && !quiet ? 1 : 0) + (isFacRole && b.company === 'RGAB' && !isHistory(b) ? 1 : 0);
+      var live = ['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b) && !(quiet && dr.preview404); var nreq = (live ? 1 : 0) + (isFacRole && !isHistory(b) && !quiet ? 1 : 0) + (isFacRole && b.company === 'RGAB' && !isHistory(b) ? 1 : 0);
       dr.pending = quiet ? 0 : nreq; var remaining = nreq;
       var settle = function () { remaining -= 1; if (state.drawer !== dr) return; if (dr.pending > 0) dr.pending -= 1; if (remaining <= 0) { dr.extrasLoading = false; if (!quiet || previousErrors !== JSON.stringify(dr.loadErrors)) softRender(); } };
       var failed = function (part, e) { if (state.drawer === dr) dr.loadErrors[part] = e.message || 'Could not load. Press Retry.'; };
       if (!nreq) dr.extrasLoading = false;
       // if the company offers a grading form for this interview (addendum 0.3.7), show it
-      if (['confirmed', 'completed'].indexOf(b.status) >= 0 && !isHistory(b)) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) {
+      if (live) api('GET', '/ui/api/booking/' + id + '/preview').then(function (p) {
+        dr.preview404 = false;
         if (!(state.drawer === dr && p)) return; var changed = false; var x = state.drawer.extra = state.drawer.extra || {};
         if (p.job_position && x.job_position !== p.job_position) { x.job_position = p.job_position; changed = true; } if (p.advisor_name && x.advisor_name !== p.advisor_name) { x.advisor_name = p.advisor_name; changed = true; }
         if (typeof p.to === 'string' && p.to.indexOf('@') > 0 && !p.placeholder && x.client_email !== p.to) { x.client_email = p.to; changed = true; }
@@ -1041,7 +1042,7 @@
         if (JSON.stringify(dr.workspace || null) !== JSON.stringify(workspace)) { dr.workspace = workspace; changed = true; }
         if (p.branding && p.branding.name && x.branding !== p.branding.name) { x.branding = p.branding.name; changed = true; }
         if (changed) softRender();
-      }).catch(function (e) { failed('preview', e); }).then(settle);
+      }).catch(function (e) { if (e && e.status === 404) { dr.preview404 = true; failed('preview', new Error(b.company + ' cannot find the details of this interview yet. It is not a problem with your screen. Tell the owner which interview it is.')); } else failed('preview', e); }).then(settle);   // a missing interview is asked about once, not every 15 seconds
       // Document listing is an audited user view. Background status refresh must not generate another view audit.
       if (isFacRole && !isHistory(b) && !quiet) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
         if (state.drawer !== dr) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
