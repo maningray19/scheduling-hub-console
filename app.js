@@ -65,7 +65,7 @@
     return fetch(base + path, opts).then(function (r) {
       return r.json().catch(function (e) { if (expired) throw e; return null; }).then(function (j) {
         if (r.ok && !(typeof isPendingActionResponse === 'function' && isPendingActionResponse(j)) && (!j || j.ok !== false) && toastFor(method, path)) toast(toastFor(method, path));
-        if (j && j.token && (path === '/ui/api/login' || path === '/ui/api/login-sso') && base) setToken(j.token);
+        if (j && j.token && (path === '/ui/api/login' || path === '/ui/api/login-sso' || path === '/ui/api/launch') && base) setToken(j.token);
         if (path === '/ui/api/logout' && base) setToken(null);
         if (r.status === 401 && path !== '/ui/api/login' && state.user === requestUser && (typeof liveSession !== 'number' || liveSession === requestSession)) { if (typeof endSession === 'function') endSession(); else state.user = null; render(); }
         if (!r.ok) { var e = new Error((j && j.error && j.error.message) || 'Request failed'); e.code = j && j.error && j.error.code; e.status = r.status; throw e; }
@@ -1562,9 +1562,15 @@
     try { renderMain(); } catch (e) { var m = document.getElementById('main'); if (m) { m.textContent = ''; m.appendChild(h('p', { class: 'note', text: 'Loading...' })); } }   // this tab's data is not loaded yet: it is drawn when it arrives
     return refreshTab();
   }
+  // Opened from a company's own app: the address carries a one-time signed assertion in the part after #, which is removed from the address bar at once
+  function takeLaunch() {
+    var h = window.location.hash || ''; if (h.indexOf('#launch=') !== 0) return Promise.resolve();
+    var a = h.slice(8); try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) { /* address bar left as is */ }
+    return api('POST', '/ui/api/launch', { assertion: a }).catch(function () { /* not accepted: the normal sign-in page is shown */ });
+  }
   function init() {
     stopLive(); var session = ++liveSession;
-    return api('GET', '/ui/api/me').then(function (m) { if (session !== liveSession) return; state.user = m.user; return loadControls(); }).then(function () { if (session !== liveSession || !state.user) return; render(); startLive(true); return refreshTab(); }).catch(function (e) { if (session !== liveSession) return; if (e && e.status !== 401) console.error('init failed', e && e.stack || e); endSession(); render(); });
+    return takeLaunch().then(function () { return api('GET', '/ui/api/me'); }).then(function (m) { if (session !== liveSession) return; state.user = m.user; return loadControls(); }).then(function () { if (session !== liveSession || !state.user) return; render(); startLive(true); return refreshTab(); }).catch(function (e) { if (session !== liveSession) return; if (e && e.status !== 401) console.error('init failed', e && e.stack || e); endSession(); render(); });
   }
   document.addEventListener('keydown', function (e) {
     if (!state.user || e.ctrlKey || e.metaKey || e.altKey || document.body.classList.contains('touring') || /INPUT|SELECT|TEXTAREA/.test((document.activeElement || {}).tagName || '') || document.querySelector('dialog[open]')) return;
