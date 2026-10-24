@@ -475,7 +475,7 @@
         return h('tr', { class: x.rank && x.rank <= 3 ? 'top' + x.rank : '' },
           h('td', { class: 'rank', text: x.rank ? x.rank + medal : '-', title: x.rank ? '' : 'Not ranked: fewer than ' + MIN + ' results for this ranking' }),
           h('td', null, a.advisor_name || (a.advisor_ref ? 'Staff ' + String(a.advisor_ref).slice(0, 8) : 'No counselor on record'), a.no_results_yet && !a.released ? h('span', { class: 'chip', text: 'No result sent yet' + (a.interviews ? ' - ' + a.interviews + ' interview' + (a.interviews === 1 ? '' : 's') : ''), title: 'Listed so every ' + (co === 'RGAB' ? 'counselor' : 'advisor') + ' is visible, also new staff' }) : null),
-          h('td', { text: a.interviews_done === undefined ? '-' : String(a.interviews_done), title: 'Interviews held in this period' }), h('td', { text: a.waiting === undefined ? '-' : String(a.waiting), title: 'Approved, result e-mail not sent yet' }),
+          h('td', { text: a.interviews_done === undefined ? '-' : String(a.interviews_done), title: 'Interviews held in this period' }), h('td', { text: a.waiting === undefined || a.waiting === null ? '-' : String(a.waiting), title: a.waiting === undefined || a.waiting === null ? 'Not known: ' + co + ' sends its own result e-mails and does not tell the Command Center before sending' : 'Approved, result e-mail not released yet' }),
           nums.map(function (n) { return h('td', { text: String(n) }); }),
           h('td', { text: rate(a.delivered, a.released) }), h('td', { text: rate(a.accepted, decided) + (decided ? ' (of ' + decided + ')' : '') }), h('td', { text: rate(a.rejected, decided) }),
           h('td', { text: a.avg_answer_hours === null || a.avg_answer_hours === undefined ? 'N/A' : a.avg_answer_hours + ' h' }));
