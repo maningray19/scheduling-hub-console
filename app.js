@@ -61,7 +61,7 @@
     function cancelRequest() { controller.abort(); }
     if (externalSignal) { if (externalSignal.aborted) cancelRequest(); else externalSignal.addEventListener('abort', cancelRequest, { once: true }); }
     opts.signal = controller.signal;
-    var timer = setTimeout(function () { expired = true; controller.abort(); }, method === 'GET' ? (/\/live-updates/.test(path) ? 35000 : 25000) : 45000);
+    var timer = setTimeout(function () { expired = true; controller.abort(); }, method === 'GET' ? (/\/live-updates/.test(path) ? 35000 : /\/preview/.test(path) ? 60000 : 25000) : 45000);
     return fetch(base + path, opts).then(function (r) {
       return r.json().catch(function (e) { if (expired) throw e; return null; }).then(function (j) {
         if (r.ok && !(typeof isPendingActionResponse === 'function' && isPendingActionResponse(j)) && (!j || j.ok !== false) && toastFor(method, path)) toast(toastFor(method, path));
