@@ -980,7 +980,16 @@
     var testCard = state.user && state.user.role === 'approver' ? h('div', { class: 'card' }, h('h2', { text: 'Test records' }),
       h('p', { class: 'note', text: 'The QA employee and the QA client are hidden from every screen, for everyone. Switch this on only when you are testing: the test records then appear (marked) for you until you switch it off or sign out.' }),
       h('label', null, h('input', { type: 'checkbox', id: 'show-test', checked: !!state.showTest, onchange: function (e) { state.showTest = e.target.checked; calCache = []; resCache = {}; refreshAll(); } }), ' Show test records (owners only)')) : null;
-    return h('div', null, controls, testCard, h('div', { class: 'grid2' }, incidents, report), noticesCard(), audit);
+    var rep = state.tabData.reporting; var ago = function (iso) { if (!iso) return 'never'; var m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return m < 60 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+    var reportCard = rep && state.user && state.user.role === 'approver' ? h('div', { class: 'card' }, h('h2', { text: 'Company reporting (real time)' }),
+      h('p', { class: 'note', text: 'Each company must report what happens to a result (sent, delivered, opened, accepted) within minutes, and keep its staff list current. The ranking is only as exact as these reports.' }),
+      rep.companies.map(function (c) {
+        var issues = []; if (c.unreported_sent > 0) issues.push(c.unreported_sent + ' released result' + (c.unreported_sent === 1 ? '' : 's') + ' never reported as sent'); if (c.late_events_7d > 0) issues.push(c.late_events_7d + ' report' + (c.late_events_7d === 1 ? '' : 's') + ' came more than 10 minutes late (longest ' + c.max_lag_min_7d + ' min)'); if (c.outbox_pending_15m > 0) issues.push(c.outbox_pending_15m + ' update' + (c.outbox_pending_15m === 1 ? '' : 's') + ' waiting to be picked up for more than 15 minutes'); if (!c.roster || !c.roster.offered) issues.push('no staff list yet, so new or deactivated staff are not reflected in the ranking');
+        return h('div', { class: 'card' }, h('div', null, companyBadge(c.company), ' ', chip(issues.length ? 'Needs attention' : 'Reporting well', issues.length ? 'warn' : 'ok')),
+          h('p', { class: 'note', text: 'Results released in the last 14 days: ' + c.releases_14d + '. Reports received in the last 7 days: ' + c.events_7d + '. Last report: ' + ago(c.last_event_at) + '. Last full results record: ' + ago(c.last_history_at) + '. Staff list: ' + (c.roster && c.roster.offered ? c.roster.count + ' active people' : 'not offered') + '.' }),
+          issues.length ? h('ul', null, issues.map(function (t) { return h('li', { text: t }); })) : h('p', { text: 'Nothing is missing.' }));
+      })) : null;
+    return h('div', null, controls, reportCard, testCard, h('div', { class: 'grid2' }, incidents, report), noticesCard(), audit);
   }
 
   function linksTab() {
@@ -1640,6 +1649,7 @@
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
     if (t === 'management') {
       jobs.push(api('GET', '/ui/api/incidents').then(function (i) { state.tabData.incidents = i; }).catch(function () {}));
+      if (state.user && state.user.role === 'approver') jobs.push(api('GET', '/ui/api/reporting-health').then(function (h2) { state.tabData.reporting = h2; }).catch(function () {}));
       jobs.push(api('GET', '/ui/api/audit').then(function (a) { state.tabData.audit = a; }).catch(function () { state.tabData.audit = { items: [] }; }));
       jobs.push(api('GET', '/ui/api/report?from=' + rng).then(function (r) { state.tabData.report = r; }).catch(function () {}));
       jobs.push(api('GET', '/ui/api/notices?all=1').then(function (r) { state.tabData.noticesAll = r; }).catch(function () {}));
