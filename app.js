@@ -644,8 +644,7 @@
             var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             target.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'center' }); target.focus({ preventScroll: true });
             message.textContent = 'Choose the interview card to open its step-by-step guide. No interview status has changed.';
-          } }),
-          h('a', { class: 'btn secondary', href: 'booking-backup.html', text: 'Read the backup guide' }))),
+          } }))),
       h('ol', { class: 'workflow-overview-stages', 'aria-label': 'Six interview stages' }, stages.map(function (label, index) {
         return h('li', null, h('span', { class: 'workflow-overview-number', 'aria-hidden': 'true', text: ('0' + (index + 1)).slice(-2) }), h('span', { text: label }));
       })), message);
