@@ -464,7 +464,7 @@
       return [a.released >= MIN, -a.ignored];   // fewest ignored
     }
     function rankingCard(co) {
-      var list = (r.by_advisor || []).filter(function (a) { return a.company === co; }).map(function (a) { return { a: a, dec: a.accepted + a.rejected }; });
+      var list = (r.by_advisor || []).filter(function (a) { return a.company === co && (state.showFormer || !a.inactive); }).map(function (a) { return { a: a, dec: a.accepted + a.rejected }; });
       list.forEach(function (x) { var p = pv(x); x.ok = p[0]; x.v = p[1]; });
       list.sort(function (p, q) { return (q.ok - p.ok) || (q.v - p.v) || (q.a.released - p.a.released) || (q.a.accepted - p.a.accepted); });
       var rank = 0, prev = null, pos = 0;
@@ -474,7 +474,8 @@
         var nums = [a.released, a.delivered, a.opened, a.accepted, a.rejected, a.released - decided - a.bounced - a.waiting_for_company - a.ignored, a.ignored];
         return h('tr', { class: x.rank && x.rank <= 3 ? 'top' + x.rank : '' },
           h('td', { class: 'rank', text: x.rank ? x.rank + medal : '-', title: x.rank ? '' : 'Not ranked: fewer than ' + MIN + ' results for this ranking' }),
-          h('td', { text: a.advisor_name || (a.advisor_ref ? 'Staff ' + String(a.advisor_ref).slice(0, 8) : 'No counselor on record') }),
+          h('td', null, a.advisor_name || (a.advisor_ref ? 'Staff ' + String(a.advisor_ref).slice(0, 8) : 'No counselor on record'), a.no_results_yet && !a.released ? h('span', { class: 'chip', text: 'No result sent yet' + (a.interviews ? ' - ' + a.interviews + ' interview' + (a.interviews === 1 ? '' : 's') : ''), title: 'Listed so every ' + (co === 'RGAB' ? 'counselor' : 'advisor') + ' is visible, also new staff' }) : null),
+          h('td', { text: a.interviews_done === undefined ? '-' : String(a.interviews_done), title: 'Interviews held in this period' }), h('td', { text: a.waiting === undefined ? '-' : String(a.waiting), title: 'Approved, result e-mail not sent yet' }),
           nums.map(function (n) { return h('td', { text: String(n) }); }),
           h('td', { text: rate(a.delivered, a.released) }), h('td', { text: rate(a.accepted, decided) + (decided ? ' (of ' + decided + ')' : '') }), h('td', { text: rate(a.rejected, decided) }),
           h('td', { text: a.avg_answer_hours === null || a.avg_answer_hours === undefined ? 'N/A' : a.avg_answer_hours + ' h' }));
@@ -483,7 +484,7 @@
       return h('div', { class: 'card scroll-x rankcard brand-' + co },
         h('h2', null, companyBadge(co), ' ' + co + ' - ' + what + ' ranking'),
         h('p', { class: 'note', text: 'Ranked by: ' + basis + '. Period: ' + resRange()[0] + ' to ' + addDays(resRange()[1], -1) + ' (Dubai). Rates use the answered results shown in brackets; "-" = not ranked (fewer than ' + MIN + ' for this ranking).' }),
-        rows.length ? h('table', null, h('thead', null, h('tr', null, ['#', co === 'RGAB' ? 'Counselor' : 'Advisor', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Pending', 'Ignored', 'Delivery rate', 'Acceptance rate', 'Rejection rate', 'Avg answer time'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
+        rows.length ? h('table', null, h('thead', null, h('tr', null, ['#', co === 'RGAB' ? 'Counselor' : 'Advisor', 'Interviews held', 'Waiting to send', 'Sent', 'Delivered', 'Opened', 'Accepted', 'Rejected', 'Pending', 'Ignored', 'Delivery rate', 'Acceptance rate', 'Rejection rate', 'Avg answer time'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
           : h('p', { class: 'note', text: 'No results were sent in this period.' }));
     }
     var rankSel = h('select', { id: 'rank-by', 'aria-label': 'Rank by', onchange: function (e) { state.rankBy = e.target.value; renderMain(); } }, RANKS.map(function (o) { return h('option', { value: o[0], text: 'Rank by: ' + o[1], selected: by === o[0] }); }));
@@ -497,7 +498,8 @@
     var customBox = curP === 'custom' ? h('span', { class: 'toolbar-group' },
       h('input', { type: 'date', 'aria-label': 'Ranking from', value: state.resFrom || rg[0], onchange: function (e) { state.resFrom = e.target.value; state.resTo = state.resTo || e.target.value; refresh(); } }),
       h('input', { type: 'date', 'aria-label': 'Ranking until', value: state.resTo || addDays(rg[1], -1), onchange: function (e) { state.resTo = e.target.value; state.resFrom = state.resFrom || e.target.value; refresh(); } })) : null;
-    var advisors = h('div', { class: 'rankings' }, h('div', { class: 'toolbar' }, h('strong', { text: 'Ranking of advisors and counselors (a separate card for each company)' }), periodSeg, customBox, rankSel), cos.map(rankingCard));
+    var formerBox = h('label', { class: 'former-toggle' }, h('input', { type: 'checkbox', id: 'show-former', checked: !!state.showFormer, onchange: function (e) { state.showFormer = e.target.checked; renderMain(); } }), ' Show former staff');
+    var advisors = h('div', { class: 'rankings' }, h('div', { class: 'toolbar' }, h('strong', { text: 'Ranking of advisors and counselors (a separate card for each company)' }), periodSeg, customBox, rankSel, formerBox), cos.map(rankingCard));
     var rows = r.items.map(function (i) {
       var st = RES_STATE[i.state] || [i.state, '']; var ev = i.events || {};
       var when = function (k) { return ev[k] ? localDate(ev[k]) + ' ' + localTime(ev[k]) : '-'; };
