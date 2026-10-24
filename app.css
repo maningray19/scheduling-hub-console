@@ -552,3 +552,5 @@ nav.tabs button[aria-selected=true] { background: linear-gradient(110deg, #17274
 .operational-guidance h4 { margin: 12px 0 6px; }
 .operational-guidance ol { padding-left: 22px; }
 .operational-guidance li { margin-bottom: 8px; }
+.dupwarn { margin: 10px 0; padding: 10px 14px; border: 2px solid #b91c1c; border-radius: 10px; background: #fef2f2; color: #7f1d1d; }
+.dupwarn ul { margin: 6px 0 6px 18px; }

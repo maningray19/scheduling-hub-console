@@ -993,9 +993,15 @@
       if (state.drawer !== dr) return;
       dr.loading = false; dr.b = b; renderMain();
       if (limited()) return;
-      loadDrawerExtras(id, b);
+      loadDrawerExtras(id, b); loadDupes(id, b);
     }).catch(function (e) { if (state.drawer !== dr) return; dr.loading = false; dr.error = e.message; renderMain(); });
   }
+  // the same client booked twice (for example an old record and a new one): shown on the card and in the release box so a second result is never released by mistake
+  function loadDupes(id, b) {
+    var role = state.user && state.user.role; if ((role !== 'facilitator' && role !== 'approver') || isHistory(b)) return;
+    api('GET', '/ui/api/booking/' + id + '/possible-duplicates').then(function (r) { if (!(state.drawer && state.drawer.id === id)) return; var items = (r && r.items) || []; if (JSON.stringify(items) !== JSON.stringify(state.drawer.dups || [])) { state.drawer.dups = items; softRender(); } }).catch(function () {});
+  }
+  function dupText(x) { return localDate(x.start) + ' ' + localTime(x.start) + ' - ' + statusLabel(x.status) + (x.assessment_status && x.assessment_status !== 'none' ? ', assessment ' + String(x.assessment_status).replace('_', ' ') : ''); }
   // redraws the open interview card without wiping what is being typed
   function softRender() { if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.closest && document.activeElement.closest('.drawer')) return; renderMain(); }
   // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
@@ -1041,6 +1047,8 @@
     if (limited()) return limitedDrawer(box, dr);
     var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var dash = dr.pending > 0 ? 'Loading...' : '-'; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
     box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
+    if (dr.dups && dr.dups.length) box.appendChild(h('div', { class: 'dupwarn', role: 'alert' }, h('strong', { text: 'Possible duplicate: this client has another interview with ' + b.company + '.' }),
+      h('ul', null, dr.dups.map(function (x) { return h('li', { text: dupText(x) }); })), h('p', { text: 'Use ONE interview for the result. Do not release or send a second result for the same client. Tell the owner if both should stay.' })));
     var pendingCard = pendingActionCard(b); if (pendingCard) box.appendChild(pendingCard);
     if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
     var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || dash], ['Program applied', d.program_applied || dash, !d.program_applied && !(dr.pending > 0)], ['Country applied', d.country_applied || dash], ['Salary', d.salary || dash], ['Nationality', d.nationality || dash],
@@ -1245,6 +1253,9 @@
   function confirmRelease(b, msg) {
     api('GET', '/ui/api/booking/' + b.id + '/preview').then(function (p) {
       var rt = p.workspace && p.workspace.release_timing; var timing = null; var pick = null; var nowBox = null;
+      var dupList = ((state.drawer && state.drawer.id === b.id && state.drawer.dups) || []).filter(function (x) { return x.status === 'completed' || x.status === 'confirmed'; });
+      var dupBox = dupList.length ? h('input', { type: 'checkbox', id: 'release-dup-ok', onchange: function (e) { var cb = document.getElementById('release-confirm'); if (cb) cb.disabled = !(e.target.checked && brandOk(p)); } }) : null;
+      var dupNote = dupList.length ? h('div', { class: 'dupwarn' }, h('strong', { text: 'This client has another interview:' }), h('ul', null, dupList.map(function (x) { return h('li', { text: dupText(x) }); })), h('label', null, dupBox, ' I checked: this is NOT a second result for the same client.')) : null;
       if (rt && rt.options && rt.options.length) {
         var lab = function (n) { return n < 24 ? n + ' hours' : n === 24 ? '24 hours (1 day, standard)' : n % 24 === 0 ? (n / 24) + ' days' : n + ' hours'; };
         pick = h('select', { id: 'release-hours', 'aria-label': 'Send the result to the client after' }, rt.options.map(function (n) { return h('option', { value: String(n), text: lab(n), selected: n === rt.default }); }));
@@ -1252,9 +1263,9 @@
         timing = h('div', { class: 'card' }, h('label', { for: 'release-hours', text: 'Send the result e-mail to the client after: ' }), pick, h('p', { class: 'note', text: 'The standard is 24 hours. The shortest is 3 hours and the longest is 5 days.' }),
           nowBox ? h('label', null, nowBox, ' Send now (super admin only)') : null);
       }
-      var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p), timing,
+      var dlg = h('dialog', { id: 'release-dialog' }, h('h3', { text: 'Release this result in ' + p.company + ' branding?' }), previewBlock(p), dupNote, timing,
         h('p', { text: 'Release asks ' + p.company + ' to process this result using its own checks and sending schedule. A recorded release does not prove the e-mail was sent or delivered. Recipient, template and branding are validated by that company.' }),
-        h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p), text: 'Yes, release', onclick: function () {
+        h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'release-confirm', type: 'button', disabled: !brandOk(p) || !!dupBox, text: 'Yes, release', onclick: function () {
           dlg.close(); var rbody = {}; if (pick) { if (nowBox && nowBox.checked) rbody.send_now = true; else rbody.send_after_hours = parseInt(pick.value, 10); } api('POST', '/ui/api/booking/' + b.id + '/release', rbody).then(function (r) { var pending = recordCompanyAction(b, 'release', r); msg.className = pending ? 'note' : 'ok'; msg.textContent = pending ? 'Company verification is pending. Refresh the current interview to check its status.' : 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); if (pending) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
         } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
       document.body.appendChild(dlg); dlg.addEventListener('close', function () { disposePreviews(dlg); dlg.remove(); }); dlg.showModal();
