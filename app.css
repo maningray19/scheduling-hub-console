@@ -554,3 +554,22 @@ nav.tabs button[aria-selected=true] { background: linear-gradient(110deg, #17274
 .operational-guidance li { margin-bottom: 8px; }
 .dupwarn { margin: 10px 0; padding: 10px 14px; border: 2px solid #b91c1c; border-radius: 10px; background: #fef2f2; color: #7f1d1d; }
 .dupwarn ul { margin: 6px 0 6px 18px; }
+.notices.memo-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border: 1px solid #f59e0b; border-radius: 12px; background: #fffbeb; color: #78350f; font-weight: 600; }
+.drawer.still { animation: none; }
+.worldclock { display: flex; flex-wrap: nowrap; gap: 5px; align-items: stretch; margin-right: 10px; }
+.worldclock .wc { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; min-width: 66px; padding: 3px 6px; border-radius: 9px; background: rgba(255,255,255,.1); color: #fff; border: 0; font: inherit; }
+.worldclock .wc-uae { background: #0f1b2d; border: 1.5px solid #d4a017; cursor: pointer; min-width: 118px; }
+.worldclock .wc-uae .wc-city { color: #d4a017; font-weight: 800; opacity: 1; }
+.worldclock .wc-uae .wc-time { font-size: 17px; }
+.worldclock .wc-date { font-size: 10px; opacity: .85; }
+.worldclock .wc-city { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
+.worldclock .wc-time { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.wc-card .wc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.wc-card .wc-big { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 6px 0; }
+.wc-card.night { background: #0f1b2d; color: #e2e8f0; } .wc-card.night .note { color: #cbd5e1; }
+.wc-star { padding: 2px 10px; font-size: 18px; line-height: 1.2; }
+.wc-region h3 { margin: 18px 0 8px; }
+@media (max-width: 760px) { .worldclock { order: 5; width: 100%; margin-right: 0; } }
+@media (max-width: 1560px) { .worldclock .wc:nth-child(n+7) { display: none; } }
+@media (max-width: 1250px) { .worldclock .wc:nth-child(n+5) { display: none; } }

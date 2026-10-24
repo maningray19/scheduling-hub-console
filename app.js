@@ -530,7 +530,10 @@
     if (gate && gate.dataset.id === keep) return; if (og) og.remove(); if (gate) { document.body.appendChild(gate); setTimeout(gate.__check, 30); }
   }
   function noticesBar() {
-    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked && (!n.mandatory || state.user.role !== 'facilitator'); }); if (!open.length) return null;
+    var memoRole = state.user.role === 'facilitator' || state.user.role === 'approver';
+    var waiting = (state.notices || []).filter(function (n) { return n.active && !n.acked && n.mandatory; });
+    if (state.user.role === 'approver' && state.gateSnoozed && waiting.length) return h('div', { class: 'notices memo-bar', role: 'status' }, h('span', { text: waiting.length + (waiting.length === 1 ? ' notice is' : ' notices are') + ' waiting for you. ' }), h('button', { class: 'btn', type: 'button', id: 'memo-read', text: 'Read now', onclick: function () { state.gateSnoozed = false; updateNoticesUi(); } }));
+    var open = (state.notices || []).filter(function (n) { return n.active && !n.acked && (!n.mandatory || !memoRole); }); if (!open.length) return null;
     return h('div', { class: 'notices' }, open.map(function (n) {
       return h('div', { class: 'notice', role: 'alert' }, h('strong', { class: 'notice-t', text: n.title }), h('p', { class: 'notice-b', text: n.body }),
         h('div', { class: 'notice-f' }, h('span', { class: 'note', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) }),
@@ -780,7 +783,8 @@
   }
   // a gated (mandatory) notice covers the screen until the person presses "Got it"
   function gateOverlay() {
-    var pending = state.user && state.user.role === 'facilitator' ? (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; }) : [];
+    var gateRole = state.user && (state.user.role === 'facilitator' || (state.user.role === 'approver' && !state.gateSnoozed));   // owners see the same centred memo; "Read later" lets them reach the emergency controls first
+    var pending = gateRole ? (state.notices || []).filter(function (x) { return x.active && x.mandatory && !x.acked; }) : [];
     var n = pending[0]; document.body.classList.toggle('gated', !!n); if (!n) return null;
     var reached = false, sending = false, initialized = false, disposed = false;
     var lastHeight = 0, lastWidth = 0, resizeObserver, removalObserver;
@@ -795,12 +799,13 @@
         if (!el.isConnected) return; sending = false; error.textContent = failure.message || 'Acknowledgement could not be verified. Please try again.'; el.__check();
       });
     } });
+    var later = state.user.role === 'approver' ? h('button', { class: 'btn secondary', type: 'button', id: 'gate-later', text: 'Read later', onclick: function () { state.gateSnoozed = true; updateNoticesUi(); } }) : null;
     var header = h('header', { class: 'gate-header' }, h('div', { class: 'gate-eyebrow', text: 'Required notice' + (pending.length > 1 ? ' | ' + pending.length + ' awaiting acknowledgement' : '') }),
       n.company ? h('div', { class: 'gate-company' }, companyBadge(n.company), h('span', { class: 'note', text: ' Notice from ' + n.company })) : null,
       h('h2', { id: 'gate-title', text: n.title }),
       h('p', { class: 'note', id: 'gate-description', text: 'From ' + (n.from || 'the owner') + ', ' + localDate(n.created_at) + ' ' + localTime(n.created_at) + '. Read this notice before continuing. Your explicit acknowledgement is recorded with the date and time.' }));
     var el = h('div', { class: 'gate', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'gate-title', 'aria-describedby': 'gate-description gate-hint', 'data-id': n.id },
-      h('section', { class: 'gate-box', tabindex: '-1' }, header, scroller, h('footer', { class: 'gate-footer' }, hint, error, ok)));
+      h('section', { class: 'gate-box', tabindex: '-1' }, header, scroller, h('footer', { class: 'gate-footer' }, hint, error, later, ok)));
     function focusMessage() { if (el.isConnected) scroller.focus({ preventScroll: true }); }
     function keydown(event) {
       if (!el.isConnected) return;
@@ -1016,7 +1021,12 @@
   }
   function dupText(x) { return localDate(x.start) + ' ' + localTime(x.start) + ' - ' + statusLabel(x.status) + (x.assessment_status && x.assessment_status !== 'none' ? ', assessment ' + String(x.assessment_status).replace('_', ' ') : ''); }
   // redraws the open interview card without wiping what is being typed
-  function softRender() { if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.closest && document.activeElement.closest('.drawer')) return; renderMain(); }
+  function softRender() {
+    if (document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.closest && document.activeElement.closest('.drawer')) return;
+    var old = document.querySelector('.drawer'); var top = old ? old.scrollTop : 0; var mainTop = window.pageYOffset;
+    renderMain();
+    var neu = document.querySelector('.drawer'); if (neu && top) neu.scrollTop = top; if (mainTop) window.scrollTo(0, mainTop);
+  }
   // what RGAB gives only in its preview, its documents list and its counselor confirmations (its list lookup has just five fields): merged into the card, live
   function loadDrawerExtras(id, b, quiet) {
       var dr = state.drawer; if (!dr || dr.id !== id || dr.extrasLoading) return Promise.resolve();
@@ -1055,7 +1065,7 @@
   function drawerEl() {
     var dr = state.drawer; if (!dr) return null;
     var close = h('button', { class: 'btn secondary', type: 'button', text: 'Close', id: 'drawer-close', onclick: function () { state.drawer = null; renderMain(); } });
-    var box = h('aside', { class: 'drawer', role: 'dialog', 'aria-label': 'Interview details' }, close);
+    var box = h('aside', { class: 'drawer' + (dr.shown ? ' still' : ''), role: 'dialog', 'aria-label': 'Interview details' }, close); dr.shown = true;
     if (dr.loading) { box.appendChild(h('p', { text: 'Loading...' })); return box; }
     if (dr.error) { box.appendChild(h('p', { class: 'err', role: 'alert', text: dr.error })); box.appendChild(h('button', { class: 'btn secondary', type: 'button', text: 'Retry interview details', onclick: function () { openDrawer(dr.id); } })); return box; }
     if (limited()) return limitedDrawer(box, dr);
@@ -1293,6 +1303,65 @@
 
   // ------------------------------------------------------------ shell
   // Sign in: the person's company login (email + password go straight to that company's own login service) or the Command Center's own login name; both need the one-time code.
+  // World clock (addendum-free, same list and look as the company portals): UAE first, 12-hour AM/PM, a top strip of favourites and a page with every place
+
+  var WC_REGIONS = [
+    ['GCC', [['ae-dubai', 'United Arab Emirates', 'Dubai', 'Asia/Dubai'], ['sa-riyadh', 'Saudi Arabia', 'Riyadh', 'Asia/Riyadh'], ['qa-doha', 'Qatar', 'Doha', 'Asia/Qatar'], ['kw-kuwait-city', 'Kuwait', 'Kuwait City', 'Asia/Kuwait'], ['bh-manama', 'Bahrain', 'Manama', 'Asia/Bahrain'], ['om-muscat', 'Oman', 'Muscat', 'Asia/Muscat']]],
+    ['Southeast Asia', [['ph-manila', 'Philippines', 'Manila', 'Asia/Manila'], ['sg-singapore', 'Singapore', 'Singapore', 'Asia/Singapore'], ['my-kuala-lumpur', 'Malaysia', 'Kuala Lumpur', 'Asia/Kuala_Lumpur'], ['id-jakarta', 'Indonesia', 'Jakarta', 'Asia/Jakarta'], ['id-makassar', 'Indonesia', 'Makassar', 'Asia/Makassar'], ['id-jayapura', 'Indonesia', 'Jayapura', 'Asia/Jayapura'], ['th-bangkok', 'Thailand', 'Bangkok', 'Asia/Bangkok'], ['vn-hanoi', 'Vietnam', 'Hanoi', 'Asia/Ho_Chi_Minh'], ['kh-phnom-penh', 'Cambodia', 'Phnom Penh', 'Asia/Phnom_Penh'], ['la-vientiane', 'Laos', 'Vientiane', 'Asia/Vientiane'], ['mm-yangon', 'Myanmar', 'Yangon', 'Asia/Yangon'], ['bn-bandar-seri-begawan', 'Brunei', 'Bandar Seri Begawan', 'Asia/Brunei'], ['tl-dili', 'Timor-Leste', 'Dili', 'Asia/Dili']]],
+    ['East Asia', [['jp-tokyo', 'Japan', 'Tokyo', 'Asia/Tokyo'], ['kr-seoul', 'South Korea', 'Seoul', 'Asia/Seoul'], ['cn-beijing', 'China', 'Beijing', 'Asia/Shanghai'], ['hk-hong-kong', 'Hong Kong', 'Hong Kong', 'Asia/Hong_Kong'], ['tw-taipei', 'Taiwan', 'Taipei', 'Asia/Taipei']]],
+    ['Middle East and North Africa', [['jo-amman', 'Jordan', 'Amman', 'Asia/Amman'], ['eg-cairo', 'Egypt', 'Cairo', 'Africa/Cairo'], ['tr-istanbul', 'Turkey', 'Istanbul', 'Europe/Istanbul'], ['lb-beirut', 'Lebanon', 'Beirut', 'Asia/Beirut']]],
+    ['South Asia', [['in-new-delhi', 'India', 'New Delhi', 'Asia/Kolkata'], ['pk-islamabad', 'Pakistan', 'Islamabad', 'Asia/Karachi'], ['bd-dhaka', 'Bangladesh', 'Dhaka', 'Asia/Dhaka'], ['np-kathmandu', 'Nepal', 'Kathmandu', 'Asia/Kathmandu'], ['lk-colombo', 'Sri Lanka', 'Colombo', 'Asia/Colombo']]],
+    ['Europe', [['gb-london', 'United Kingdom', 'London', 'Europe/London'], ['pl-warsaw', 'Poland', 'Warsaw', 'Europe/Warsaw'], ['de-berlin', 'Germany', 'Berlin', 'Europe/Berlin'], ['fr-paris', 'France', 'Paris', 'Europe/Paris'], ['it-rome', 'Italy', 'Rome', 'Europe/Rome'], ['al-tirana', 'Albania', 'Tirana', 'Europe/Tirane'], ['fi-helsinki', 'Finland', 'Helsinki', 'Europe/Helsinki'], ['dk-copenhagen', 'Denmark', 'Copenhagen', 'Europe/Copenhagen'], ['ch-zurich', 'Switzerland', 'Zurich', 'Europe/Zurich'], ['nl-amsterdam', 'Netherlands', 'Amsterdam', 'Europe/Amsterdam'], ['es-madrid', 'Spain', 'Madrid', 'Europe/Madrid'], ['pt-lisbon', 'Portugal', 'Lisbon', 'Europe/Lisbon'], ['gr-athens', 'Greece', 'Athens', 'Europe/Athens']]],
+    ['North America', [['ca-toronto', 'Canada', 'Toronto', 'America/Toronto'], ['ca-vancouver', 'Canada', 'Vancouver', 'America/Vancouver'], ['ca-calgary', 'Canada', 'Calgary', 'America/Edmonton'], ['ca-halifax', 'Canada', 'Halifax', 'America/Halifax'], ['us-new-york', 'United States', 'New York', 'America/New_York'], ['us-los-angeles', 'United States', 'Los Angeles', 'America/Los_Angeles'], ['us-chicago', 'United States', 'Chicago', 'America/Chicago']]],
+    ['Oceania', [['au-sydney', 'Australia', 'Sydney', 'Australia/Sydney'], ['au-melbourne', 'Australia', 'Melbourne', 'Australia/Melbourne'], ['au-perth', 'Australia', 'Perth', 'Australia/Perth'], ['au-brisbane', 'Australia', 'Brisbane', 'Australia/Brisbane'], ['nz-auckland', 'New Zealand', 'Auckland', 'Pacific/Auckland']]]
+  ];
+  var WC_DEFAULT = ['ph-manila', 'sa-riyadh', 'jp-tokyo', 'kr-seoul', 'sg-singapore', 'gb-london', 'ca-toronto'];   // the strip: UAE always first, then the places staff work with
+  var WC_ALL = []; WC_REGIONS.forEach(function (r) { r[1].forEach(function (p) { WC_ALL.push({ id: p[0], region: r[0], country: p[1], city: p[2], tz: p[3] }); }); });
+  function wcPlace(id) { for (var i = 0; i < WC_ALL.length; i++) if (WC_ALL[i].id === id) return WC_ALL[i]; return null; }
+  function wcFavs() { try { var v = JSON.parse(window.localStorage.getItem('pic_wc_favs') || 'null'); if (Array.isArray(v)) return v.filter(function (id) { return id !== 'ae-dubai' && wcPlace(id); }).slice(0, 12); } catch (e) { /* default list */ } return WC_DEFAULT.slice(); }
+  function wcSaveFavs(list) { try { window.localStorage.setItem('pic_wc_favs', JSON.stringify(list)); } catch (e) { /* kept for this visit only */ } }
+  // The time is built by hand from parts: always 12-hour with AM or PM (never a locale string), the same as the staff portals.
+  function wcParts(tz, now) {
+    var f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'long' }); var o = {};
+    f.formatToParts(now).forEach(function (p) { o[p.type] = p.value; });
+    return { y: +o.year, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second, wd: o.weekday };
+  }
+  function wcTime(pt, secs) { var h12 = pt.h % 12 === 0 ? 12 : pt.h % 12; return (h12 < 10 ? '0' : '') + h12 + ':' + (pt.mi < 10 ? '0' : '') + pt.mi + (secs ? ':' + (pt.s < 10 ? '0' : '') + pt.s : '') + ' ' + (pt.h < 12 ? 'AM' : 'PM'); }
+  var WC_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function wcOffsetMin(tz, now) {
+    try { var s = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(now).filter(function (p) { return p.type === 'timeZoneName'; })[0].value; var m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(s); if (!m) return 0; return (m[1] === '-' ? -1 : 1) * (+m[2] * 60 + (+m[3] || 0)); } catch (e) { return 0; }
+  }
+  function wcDiffText(min) { if (min === 0) return 'Same time as UAE'; var a = Math.abs(min); var hh = Math.floor(a / 60); var mm = a % 60; var amt = hh + (mm ? ' h ' + mm + ' min' : (hh === 1 ? ' hour' : ' hours')); if (mm) amt = hh + ' h ' + mm + ' min'; return amt + (min > 0 ? ' ahead of UAE' : ' behind UAE'); }
+  function wcDayTag(pt, home) { var a = Date.UTC(pt.y, pt.mo - 1, pt.d), b = Date.UTC(home.y, home.mo - 1, home.d); return a === b ? 'Today' : (a < b ? 'Yesterday' : 'Tomorrow'); }
+  function wcUtc(min) { var a = Math.abs(min); return 'UTC' + (min < 0 ? '-' : '+') + (Math.floor(a / 60) < 10 ? '0' : '') + Math.floor(a / 60) + ':' + (a % 60 < 10 ? '0' : '') + (a % 60); }
+  function worldClock() {
+    var now = new Date(); var home = wcParts('Asia/Dubai', now);
+    var uae = h('button', { class: 'wc wc-uae', type: 'button', title: 'UAE local time. Open the World clock', onclick: function () { state.tab = 'worldclock'; state.fx = true; refresh(); } },
+      h('span', { class: 'wc-city', text: 'UAE' }), h('span', { class: 'wc-time wc-secs', 'data-tz': 'Asia/Dubai', 'data-secs': '1', text: wcTime(home, true) }), h('span', { class: 'wc-date', 'data-tz': 'Asia/Dubai', text: home.wd + ', ' + WC_MONTHS[home.mo - 1] + ' ' + home.d }));
+    var rest = wcFavs().map(function (id) { var p = wcPlace(id); var pt = wcParts(p.tz, now); return h('div', { class: 'wc' }, h('span', { class: 'wc-city', text: p.city }), h('span', { class: 'wc-time', 'data-tz': p.tz, text: wcTime(pt, false) })); });
+    return h('div', { class: 'worldclock', role: 'group', 'aria-label': 'World clock, UAE time first' }, [uae].concat(rest));
+  }
+  function worldClockTab() {
+    var now = new Date(); var home = wcParts('Asia/Dubai', now); var homeOff = wcOffsetMin('Asia/Dubai', now); var favs = wcFavs(); var q = (state.wcQuery || '').toLowerCase();
+    var search = h('input', { type: 'search', id: 'wc-search', placeholder: 'Search country, city or time zone', 'aria-label': 'Search the world clock', value: state.wcQuery || '', oninput: function (e) { state.wcQuery = e.target.value; var pos = e.target.selectionStart; renderMain(); var again = document.getElementById('wc-search'); if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (x) { /* ignore */ } } } });
+    function card(p) {
+      var pt = wcParts(p.tz, now); var off = wcOffsetMin(p.tz, now); var day = pt.h >= 6 && pt.h < 18; var fav = favs.indexOf(p.id) >= 0; var isUae = p.id === 'ae-dubai';
+      return h('div', { class: 'card wc-card' + (day ? ' day' : ' night') },
+        h('div', { class: 'wc-head' }, h('div', null, h('strong', { text: p.city }), h('span', { class: 'note', text: ' ' + p.country })),
+          isUae ? h('span', { class: 'chip', text: 'Reference' }) : h('button', { class: 'btn secondary wc-star', type: 'button', 'aria-pressed': String(fav), 'aria-label': (fav ? 'Remove ' : 'Add ') + p.city + (fav ? ' from' : ' to') + ' the top strip', title: fav ? 'Remove from the top strip' : 'Show in the top strip', text: fav ? '\u2605' : '\u2606', onclick: function () { var l = wcFavs(); var i = l.indexOf(p.id); if (i >= 0) l.splice(i, 1); else l.push(p.id); wcSaveFavs(l); renderMain(); } })),
+        h('div', { class: 'wc-time wc-big', 'data-tz': p.tz, text: wcTime(pt, isUae) + '' }),
+        h('div', { class: 'note', text: pt.wd + ', ' + WC_MONTHS[pt.mo - 1] + ' ' + pt.d + (isUae ? '' : ' (' + wcDayTag(pt, home) + ')') }),
+        h('div', { class: 'note', text: wcDiffText(off - homeOff) + ' - ' + wcUtc(off) + ' - ' + (day ? 'Daytime' : 'Nighttime') }));
+    }
+    var sections = WC_REGIONS.map(function (r) {
+      var list = WC_ALL.filter(function (p) { return p.region === r[0] && (!q || (p.country + ' ' + p.city + ' ' + p.tz).toLowerCase().indexOf(q) >= 0); });
+      return list.length ? h('section', { class: 'wc-region' }, h('h3', { text: r[0] }), h('div', { class: 'wc-grid' }, list.map(card))) : null;
+    });
+    return h('div', null, h('div', { class: 'card' }, h('h2', { text: 'World clock' }), h('p', { class: 'note', text: 'The UAE is always the reference (the Command Center works in Dubai time). Star a place to show it in the top strip. 12-hour time with AM and PM, the same as the company portals.' }), search),
+      sections.filter(Boolean).length ? sections : h('p', { class: 'note', text: 'No place matches your search.' }));
+  }
+  setInterval(function () { var now = new Date(); var els = document.querySelectorAll('.wc-time'); for (var i = 0; i < els.length; i++) { var tz = els[i].getAttribute('data-tz'); var t = wcTime(wcParts(tz, now), els[i].getAttribute('data-secs') === '1' || els[i].classList.contains('wc-big') && tz === 'Asia/Dubai'); if (els[i].textContent !== t) els[i].textContent = t; } var dates = document.querySelectorAll('.wc-date'); for (var j = 0; j < dates.length; j++) { var pt = wcParts('Asia/Dubai', now); var d = pt.wd + ', ' + WC_MONTHS[pt.mo - 1] + ' ' + pt.d; if (dates[j].textContent !== d) dates[j].textContent = d; } }, 1000);
+
   function loginView() {
     var methods = [['local', 'Login name']].concat(Object.keys(window.PIC_SSO || {}).map(function (c) { return [c, (window.PIC_SSO[c].label || c) + ' account']; }));
     var method = state.loginMethod && methods.some(function (m) { return m[0] === state.loginMethod; }) ? state.loginMethod : (methods.length > 1 ? methods[1][0] : 'local');
@@ -1342,7 +1411,7 @@
       window.PIC_ENV === 'live' ? null : h('p', { class: 'note', text: 'Development build: synthetic test identities only.' }));
     return form;
   }
-  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['notices', 'Notices'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
+  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['notices', 'Notices'], ['worldclock', 'World clock'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   // One visible-tab long poll. A revision invalidates data, but never replaces an open form or card.
   var live = { run: 0, timer: null, controller: null, revision: '', fingerprint: '', items: [], unread: 0, failures: 0, dirty: false, drawerPending: false, status: 'Connecting', unsupported: false };
@@ -1529,7 +1598,7 @@
     return h('div', null,
       frozen ? h('div', { class: 'banner', role: 'alert', text: 'EMERGENCY FREEZE ACTIVE: new bookings' + (state.controls.releases_enabled === false ? ' and result releases are' : ' are') + ' disabled. Existing appointments are unaffected.' }) : null,
       window.PIC_ENV === 'live' ? null : h('div', { class: 'synth', text: 'DEVELOPMENT BUILD - synthetic data only. Assessment templates shown are clearly marked placeholders, not approved templates.' }),
-      h('header', { class: 'topbar' }, h('h1', { text: 'Facilitator Command Center' }), h('span', { class: 'badge', text: u.display_name + ' - ' + u.role }),
+      h('header', { class: 'topbar' }, h('h1', { text: 'Facilitator Command Center' }), worldClock(), h('span', { class: 'badge', text: u.display_name + ' - ' + u.role }),
         h('button', { class: 'btn secondary' + (tourSeen() ? '' : ' hint'), type: 'button', id: 'tour-btn', text: 'Tour', title: 'A two-minute guided tour', onclick: function () { if (window.PICTour) window.PICTour.start(); } }),
         h('button', { class: 'btn secondary', type: 'button', id: 'logout', text: 'Sign out', onclick: function () { stopLive(); api('POST', '/ui/api/logout', {}).finally(function () { endSession(); render(); }); } })),
       h('nav', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) { return h('button', { role: 'tab', type: 'button', 'aria-selected': String(state.tab === t[0]), 'data-tab': t[0], text: t[1], onclick: function () { state.tab = t[0]; state.fx = true; refresh(); } }); })),
@@ -1540,7 +1609,7 @@
     var m = document.getElementById('main'); if (!m) return;
     if (state.tab === 'tutorials' && !state.forceRender) { var pv = m.querySelector('video'); if (pv && !pv.paused && !pv.ended) { updateNoticesUi(); return; } }
     m.textContent = '';
-    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'notices' ? noticesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
+    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'notices' ? noticesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'worldclock' ? worldClockTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     var nb = noticesBar(); if (nb) m.appendChild(nb);
     if (state.error) m.appendChild(h('div', { class: 'notice', role: 'alert' }, ['calendar', 'queues', 'results'].indexOf(state.tab) < 0 ? h('p', { text: state.error }) : null, h('button', { class: 'btn secondary', type: 'button', text: 'Retry loading', onclick: function () { refreshTab(); } })));
@@ -1614,7 +1683,7 @@
       if (state.drawer !== dr) return; var changed = JSON.stringify(nb) !== JSON.stringify(state.drawer.b);
       if (changed) { state.drawer.b = nb; softRender(); }
       live.drawerPending = false; updateLiveButton();
-      loadDrawerExtras(dr.id, nb, true);
+      dr.cycles = (dr.cycles || 0) + 1; if (changed || dr.cycles % 6 === 0) loadDrawerExtras(dr.id, nb, true);
     }).catch(function (e) { if (state.drawer === dr) { dr.loadErrors = dr.loadErrors || {}; dr.loadErrors.interview = e.message; softRender(); } }).finally(function () { dr.refreshing = false; });
   }
   // a new version of this page: noticed within a minute; reloaded by itself when nothing is being typed or played
