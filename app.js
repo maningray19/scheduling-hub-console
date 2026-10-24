@@ -37,7 +37,18 @@
     if (method === 'DELETE') return 'Removed';
     return 'Saved';
   }
+  // A failed or very slow load of an interview, its result design, its documents or a company list is reported (area, interview id, status, time only; never client data), so what Aira could not see can be found afterwards.
+  var lastProblemAt = 0;
+  function reportSlow(method, path, failed, ms) {
+    if (method !== 'GET' || (!failed && ms < 12000)) return;
+    var m = /^\/ui\/api\/(booking\/([0-9a-f-]{36})\/(preview|documents)|booking\/([0-9a-f-]{36})|lists\/(confirmations|offers))(\?|$)/.exec(path); if (!m) return;
+    if (Date.now() - lastProblemAt < 15000) return; lastProblemAt = Date.now();
+    var body = { area: m[3] || (m[4] ? 'details' : 'lists'), status: typeof failed === 'number' ? failed : (failed ? 0 : 200), ms: Math.min(Math.round(ms), 600000), note: failed ? String(failed).slice(0, 40) : 'slow' }; var bid = m[2] || m[4]; if (bid) body.booking = bid;
+    try { var base = window.PIC_API_BASE || ''; var h = { 'content-type': 'application/json', 'x-pic-csrf': '1' }; var tk = base ? getToken() : null; if (tk) h.authorization = 'Bearer ' + tk;
+      fetch(base + '/ui/api/ui-problem', { method: 'POST', credentials: base ? 'omit' : 'same-origin', headers: h, body: JSON.stringify(body), keepalive: true }).catch(function () {}); } catch (e) { /* reporting must never disturb the screen */ }
+  }
   function api(method, path, body, requestOptions) {
+    var t0 = Date.now(); var failed = null;
     var requestUser = state.user; var requestSession = typeof liveSession === 'number' ? liveSession : 0;
     var base = window.PIC_API_BASE || '';
     if (state && state.showTest && method === 'GET' && /^\/ui\/api\/(calendar|results|booking|lists)/.test(path)) path += (path.indexOf('?') >= 0 ? '&' : '?') + 'test=1';   // owners only: the server ignores it for everyone else
@@ -61,11 +72,12 @@
         return j;
       });
     }).catch(function (e) {
+      failed = e && e.status ? e.status : (expired ? 'timeout' : 'network');
       if (expired || (e && e.name === 'AbortError')) { var timeout = new Error(method === 'GET' ? 'This is taking too long. Check your connection and press Retry or Refresh.' : 'The response took too long. The change may have reached the company. Refresh and check its status before trying again.'); timeout.code = 'request_timeout'; throw timeout; }
       if (e && e.status) throw e;
       if (e instanceof TypeError) { var network = new Error(method === 'GET' ? 'The connection was interrupted. Check your connection and press Retry or Refresh.' : 'The connection was interrupted. The change may have reached the company. Refresh and check its status before trying again.'); network.code = 'network_error'; throw network; }
       throw e;
-    }).finally(function () { clearTimeout(timer); if (externalSignal) externalSignal.removeEventListener('abort', cancelRequest); });
+    }).finally(function () { clearTimeout(timer); if (externalSignal) externalSignal.removeEventListener('abort', cancelRequest); reportSlow(method, path, failed, Date.now() - t0); });
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function todayDubai() { return new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10); }
