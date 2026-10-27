@@ -627,8 +627,14 @@
     var scheduled = ['scheduled', 'queued', 'pending'].indexOf(emailState) >= 0;
     var emailText = mail.label || (rank === 5 ? 'Released to ' + b.company + '. Sending and delivery have not been confirmed here.' : 'The company supplies the sending schedule after the result is ready.');
     if (mail.scheduled_for && !isNaN(Date.parse(mail.scheduled_for))) emailText += ' Scheduled: ' + localDate(mail.scheduled_for) + ' ' + localTime(mail.scheduled_for) + ' Dubai.';
-    return { missing: missing, stopped: stopped, steps: [
+    var dd = b.details || {}; var xc = dr.extra || {}; var conf = String(dd.advisor_confirmation || '').toLowerCase(); var xconf = String(xc.confirmation || '').toLowerCase();
+    var detailsConfirmed = conf === 'confirmed' || /^confirmed/.test(xconf) || rank >= 4;
+    var detailsWaiting = !detailsConfirmed && (conf === 'pending' || /pending|sent|waiting/.test(xconf));
+    var askAgain = dr.workspace && Array.isArray(dr.workspace.actions) && dr.workspace.actions.some(function (a) { return a.id === 'ask_again'; });
+    return { missing: missing, stopped: stopped, detailsConfirmed: detailsConfirmed, detailsWaiting: detailsWaiting, askAgain: askAgain, steps: [
       { title: 'Check client and booking details', status: missing.length ? 'needs attention' : 'details available', text: missing.length ? 'Ask ' + b.company + ' to check: ' + missing.join(', ') + '. Do not guess or copy details from another booking.' : 'Check these details against the booking before continuing.' },
+      { title: who + ' confirms the client details (before the interview)', status: stopped ? 'stopped' : detailsConfirmed ? 'done' : detailsWaiting ? 'waiting for ' + who : completed ? 'needs attention' : 'needs attention',
+        text: detailsConfirmed ? 'The ' + who + ' confirmed that the client details are correct.' : detailsWaiting ? 'The request is with the ' + who + '. Wait for the answer. Do not send this interview to the interviewer until the details are confirmed.' : 'The ' + who + ' has NOT confirmed the client details. Do not send this interview to the interviewer yet: wrong details reach the interviewer. Ask the ' + who + ' to confirm now' + (askAgain ? ' (press the button below).' : ' (tell the ' + who + ' in the company, or ask the owner).'), action: !detailsConfirmed && !detailsWaiting && !stopped && askAgain ? { id: 'ask_again', label: 'Ask the ' + who + ' to confirm the details now' } : null },
       { title: 'Hold the interview', status: completed ? 'done' : stopped ? 'stopped' : 'next', text: stopped ? 'This interview is ' + statusLabel(b.status) + '. Do not create or release another result for it.' : completed ? 'The interview is marked completed.' : 'After the interview finishes, press Mark interview completed. If the client did not attend, use Mark no-show.' },
       { title: 'Record and submit the assessment', status: rank >= 2 ? 'done' : completed && !stopped ? 'next' : 'waiting', text: dr.grading && dr.grading.supports_draft === false ? 'Enter the grades and required note, then submit. This company does not offer a separate draft step.' : 'Enter the grades and required note, save the draft, check it, then submit. If grading is not offered here, complete it in the company Interview Workspace.' },
       { title: 'Get ' + who + ' confirmation', status: stopped ? 'stopped' : rank >= 4 ? 'done' : rank === 3 ? 'waiting for ' + who : rank === 2 ? 'next' : 'waiting', text: 'Send the submitted assessment to the owning ' + who + '. Wait for the company to confirm; correct any reported error in the company system.' },
@@ -637,7 +643,7 @@
     ] };
   }
   function workflowOverview() {
-    var stages = ['Check details', 'Hold the interview', 'Submit assessment', 'Get confirmation', 'Preview and release', 'Track sending'];
+    var stages = ['Check details', 'Counselor confirms details', 'Hold the interview', 'Submit assessment', 'Get confirmation', 'Preview and release', 'Track sending'];
     var message = h('p', { class: 'workflow-overview-message', role: 'status' });
     return h('section', { class: 'workflow-overview', 'aria-label': 'Interview workflow overview' },
       h('div', { class: 'workflow-overview-header' },
@@ -650,9 +656,34 @@
             target.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'center' }); target.focus({ preventScroll: true });
             message.textContent = 'Choose the interview card to open its step-by-step guide. No interview status has changed.';
           } }))),
-      h('ol', { class: 'workflow-overview-stages', 'aria-label': 'Six interview stages' }, stages.map(function (label, index) {
+      h('ol', { class: 'workflow-overview-stages', 'aria-label': 'Seven interview stages' }, stages.map(function (label, index) {
         return h('li', null, h('span', { class: 'workflow-overview-number', 'aria-hidden': 'true', text: ('0' + (index + 1)).slice(-2) }), h('span', { text: label }));
       })), message);
+  }
+  // plain words for an error, always with what to do next
+  function friendlyError(x, b) {
+    var m = String((x && x.message) || '').trim(); var c = (x && x.code) || ''; var st = x && x.status; var co = b && b.company ? b.company : 'The company';
+    var who = b && b.company === 'RGAB' ? 'Counselor' : 'advisor';
+    if (/must confirm the client details/i.test(m)) return m + ' What to do: press "Ask the ' + who + ' to confirm the details now" in the steps above and wait for the answer. If the owner already approved this send, ask the owner to record the Super Admin override first.';
+    if (/already sent/i.test(m)) return m + ' What to do: use "Resend Result" (it can use the corrected e-mail address) in "Sending schedule and company functions".';
+    if (c === 'outside_hours' || /10:00 AM to 10:00 PM/.test(m)) return m + ' What to do: try again between 10:00 AM and 10:00 PM Dubai time.';
+    if (c === 'service_unavailable' || st === 503) return co + ' did not answer in time. What to do: wait one minute, press "Refresh company details", and read the History before pressing the button again (it may have worked). If it happens three times, tell the owner the interview time.';
+    if (c === 'not_applicable') return m + ' What to do: do this step in the ' + co + ' Interview Workspace; the request to allow it here has been sent.';
+    if (c === 'invalid_transition') return (m || 'This step is not available now.') + ' What to do: press "Refresh company details"; the interview may already be at the next step. Read "Next step" above the buttons.';
+    if (c === 'invalid_input' || st === 400) return (m || 'Something in the entry is not valid.') + ' What to do: correct the entry and try again.';
+    if (st === 403 || c === 'forbidden') return 'Your account may not do this. What to do: ask the owner.';
+    if (st === 404 || c === 'not_found') return 'This interview or item was not found. What to do: press "Refresh company details". If it stays missing, tell the owner which interview it is.';
+    return (m || 'Something went wrong.') + ' What to do: press "Refresh company details" and try once more. If it fails again, tell the owner what you pressed and the time.';
+  }
+  function problemsBlock(b, dr, model) {
+    var who = b.company === 'RGAB' ? 'Counselor' : 'advisor'; var d = b.details || {}; var list = [];
+    if (b.details_unavailable || (!dr.seeded && !b.details && dr.pending <= 0)) list.push(['The details of this client could not be read from ' + b.company + '.', 'Press "Refresh company details". If it fails again, tell the owner the interview time.']);
+    if (model.missing.length && dr.pending <= 0) list.push(['Missing in ' + b.company + ': ' + model.missing.join(', ') + '.', 'Ask ' + b.company + ' to complete the record, then press "Refresh company details". Do not guess.']);
+    if (!model.stopped && !model.detailsConfirmed && !model.detailsWaiting && dr.pending <= 0 && !dr.seeded) list.push(['The ' + who + ' has not confirmed the client details.', 'Ask the ' + who + ' to confirm now (first button in step 2). Do not send the interview to the interviewer before this.']);
+    if (d.documents && /missing|none|no/i.test(String(d.documents.cv || ''))) list.push(['The CV is not uploaded.', 'Ask the ' + who + ' to upload the CV before the interview.']);
+    Object.keys(dr.loadErrors || {}).forEach(function (k) { list.push([k.charAt(0).toUpperCase() + k.slice(1) + ' could not be checked: ' + dr.loadErrors[k], 'Press "Refresh company details". If it fails again, tell the owner.']); });
+    if (!list.length) return null;
+    return h('div', { class: 'workflow-problems', role: 'alert' }, h('strong', { text: 'Fix this first (' + list.length + ')' }), h('ul', null, list.map(function (p) { return h('li', null, h('span', { text: p[0] + ' ' }), h('strong', { text: 'What to do: ' }), h('span', { text: p[1] })); })));
   }
   function workflowCard(b, dr) {
     var model = workflowModel(b, dr);
@@ -661,8 +692,8 @@
     if (current < 0) current = model.steps.findIndex(function (step) { return /waiting for|needs attention|scheduled|awaiting company/.test(step.status); });
     if (current < 0) current = model.steps.length - 1;
     var opened = dr.workflowOpen || {}; if (!dr.workflowOpen) opened[current] = true;
-    var targets = ['.drawer .kv', '.drawer [data-action="complete_interview"]', '.drawer .gradecard, .drawer [data-action="submit"]', '.drawer [data-action="request_advisor_confirmation"]', '.drawer #preview-btn', '.drawer .workspace'];
-    var shortcuts = ['Find client details', 'Find interview controls', 'Find assessment controls', 'Find confirmation controls', 'Find result preview', 'Find sending status'];
+    var targets = ['.drawer .kv', '.drawer .kv', '.drawer [data-action="complete_interview"]', '.drawer .gradecard, .drawer [data-action="submit"]', '.drawer [data-action="request_advisor_confirmation"]', '.drawer #preview-btn', '.drawer .workspace'];
+    var shortcuts = ['Find client details', 'Find the confirmation status', 'Find interview controls', 'Find assessment controls', 'Find confirmation controls', 'Find result preview', 'Find sending status'];
     function jump(index, message) {
       var target = document.querySelector(targets[index]);
       if (!target) { message.textContent = 'These controls are not available for this interview yet. Follow the recorded status and next-step message below.'; return; }
@@ -680,6 +711,7 @@
         h('h3', { text: 'Aira\'s step-by-step workflow' }),
         h('p', { class: 'workflow-current', text: model.stopped ? 'This interview is stopped. Review its recorded status.' : 'Start here: ' + model.steps[current].title }),
         h('p', { class: 'note', text: 'Open a step for guidance. Status comes from the recorded interview and company reports; opening this guide does not complete a step.' })),
+      problemsBlock(b, dr, model),
       model.missing.length ? h('p', { class: 'workflow-warning', role: 'status', text: (dr.pending > 0 ? 'Still checking details. ' : 'Details need checking. ') + 'Missing: ' + model.missing.join(', ') + '. Ask ' + b.company + ' to complete its existing source record, then refresh details.' }) : null,
       h('ol', { class: 'workflow-steps' }, model.steps.map(function (step, index) {
         var tone = /needs attention|stopped|failed|bounced/.test(step.status) ? 'attention' : step.status === 'next' ? 'current' : /^(done|released|company reports)/.test(step.status) ? 'recorded' : 'waiting';
@@ -691,6 +723,7 @@
               h('span', { class: 'workflow-step-heading' }, h('strong', { text: step.title }), h('span', { class: 'workflow-state', text: step.status })),
               h('span', { class: 'workflow-chevron', 'aria-hidden': 'true', text: '+' })),
             h('div', { class: 'workflow-step-content' }, h('p', { class: 'note', text: step.text }),
+              step.action ? h('button', { class: 'btn', type: 'button', 'data-step-action': step.action.id, text: step.action.label, onclick: function () { message.className = 'workflow-jump-message'; message.textContent = 'Asking...'; api('POST', '/ui/api/booking/' + b.id + '/action', { action: step.action.id }).then(function () { message.textContent = 'Done. The ' + (b.company === 'RGAB' ? 'Counselor' : 'advisor') + ' was asked again.'; return openDrawer(b.id); }).catch(function (x) { message.className = 'err'; message.textContent = friendlyError(x, b); }); } }) : null,
               h('button', { class: 'btn secondary workflow-jump', type: 'button', text: shortcuts[index], onclick: function () { jump(index, message); } }), message)));
       })));
   }
@@ -756,7 +789,7 @@
           if (a.id === 'reschedule' && pendingActionFor(b)) return;
           askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label, bookingId: b.id }).then(function (params) {
             if (!params) return; msg.className = 'err'; msg.textContent = '';
-            return api('POST', '/ui/api/booking/' + b.id + '/action', { action: a.id, params: params }).then(function (reply) { if (recordCompanyAction(b, a.id, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+            return api('POST', '/ui/api/booking/' + b.id + '/action', { action: a.id, params: params }).then(function (reply) { if (recordCompanyAction(b, a.id, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = friendlyError(x, b); });
           });
         } });
       })));
@@ -1016,13 +1049,16 @@
   }
 
   // ------------------------------------------------------------ drawer
+  var gradeMemo = Object.create(null);   // grades and note typed for an interview stay while the card is closed and opened again, until the assessment is submitted
   function openDrawer(id) {
-    var dr = { id: id, loading: true }; state.drawer = dr; renderMain();
+    var seed = limited() ? null : (state.items || []).concat(state.wide || []).filter(function (i) { return i.id === id; })[0];   // the calendar already knows the core's facts: show them at once
+    var dr = { id: id, loading: !seed }; if (seed) { dr.b = Object.assign({}, seed, { events: seed.events || [] }); dr.seeded = true; } state.drawer = dr; renderMain();
+    if (seed) { loadDrawerExtras(id, dr.b); loadDupes(id, dr.b); }
     return api('GET', limited() ? '/ui/api/interviewer/interview/' + id : '/ui/api/booking/' + id).then(function (b) {
       if (state.drawer !== dr) return;
-      dr.loading = false; dr.b = b; renderMain();
+      dr.loading = false; dr.seeded = false; dr.b = b; renderMain();
       if (limited()) return;
-      loadDrawerExtras(id, b); loadDupes(id, b);
+      if (!seed) { loadDrawerExtras(id, b); loadDupes(id, b); }
     }).catch(function (e) { if (state.drawer !== dr) return; dr.loading = false; dr.error = e.message; renderMain(); });
   }
   // the same client booked twice (for example an old record and a new one): shown on the card and in the release box so a second result is never released by mistake
@@ -1056,7 +1092,7 @@
         if (!(state.drawer === dr && p)) return; var changed = false; var x = state.drawer.extra = state.drawer.extra || {};
         if (p.job_position && x.job_position !== p.job_position) { x.job_position = p.job_position; changed = true; } if (p.advisor_name && x.advisor_name !== p.advisor_name) { x.advisor_name = p.advisor_name; changed = true; }
         if (typeof p.to === 'string' && p.to.indexOf('@') > 0 && !p.placeholder && x.client_email !== p.to) { x.client_email = p.to; changed = true; }
-        if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria) && !state.drawer.grading) { state.drawer.grading = p.grading; state.drawer.grades = {}; state.drawer.note = ''; changed = true; }
+        if (b.status === 'completed' && ['none', 'draft'].indexOf(b.assessment_status) >= 0 && p.grading && Array.isArray(p.grading.criteria) && !state.drawer.grading) { state.drawer.grading = p.grading; var gm = gradeMemo[id] || {}; var sv = p.grading.saved_grades && typeof p.grading.saved_grades === 'object' ? p.grading.saved_grades : {}; state.drawer.grades = gm.grades || sv; state.drawer.note = gm.note || (typeof p.grading.saved_note === 'string' ? p.grading.saved_note : ''); changed = true; }
         var workspace = p.workspace && typeof p.workspace === 'object' && Array.isArray(p.workspace.actions) ? p.workspace : null;
         if (typeof syncPendingAction === 'function' && syncPendingAction(b, workspace, pendingReadVersion)) changed = true;
         if (JSON.stringify(dr.workspace || null) !== JSON.stringify(workspace)) { dr.workspace = workspace; changed = true; }
@@ -1066,7 +1102,7 @@
       // Document listing is an audited user view. Background status refresh must not generate another view audit.
       if (isFacRole && !isHistory(b) && !quiet) api('GET', '/ui/api/booking/' + id + '/documents').then(function (dd) {
         if (state.drawer !== dr) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
-        var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; if (x.docs !== txt) { x.docs = txt; softRender(); }
+        var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; state.drawer.docItems = items; x.docs = txt; softRender();
       }).catch(function (e) { failed('documents', e); }).then(settle);
       if (isFacRole && b.company === 'RGAB' && !isHistory(b)) api('GET', '/ui/api/lists/confirmations?company=RGAB').then(function (r) {
         if (state.drawer !== dr) return; var sec = (r.sections || [])[0]; if (sec && sec.error) { failed('confirmations', new Error(sec.code === 'outside_hours' ? 'Confirmation details are available from 10:00 AM to 10:00 PM Dubai time.' : 'The company could not supply confirmation details. Press Retry.')); return; } var row = sec && (sec.rows || []).filter(function (q) { return q.booking_id === id; })[0]; if (!row) return;
@@ -1081,7 +1117,7 @@
     if (dr.error) { box.appendChild(h('p', { class: 'err', role: 'alert', text: dr.error })); box.appendChild(h('button', { class: 'btn secondary', type: 'button', text: 'Retry interview details', onclick: function () { openDrawer(dr.id); } })); return box; }
     if (limited()) return limitedDrawer(box, dr);
     var b = dr.b; var d = b.details || {}; var xx = dr.extra || {}; var dash = dr.pending > 0 ? 'Loading...' : '-'; var isFac = state.user.role === 'facilitator' || state.user.role === 'approver';   // facilitator and owners can act
-    box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || 'Details unavailable')));
+    box.appendChild(h('h2', null, companyBadge(b.company), ' ' + (d.client_name || (dr.seeded ? 'Loading...' : 'Details unavailable'))));
     if (dr.dups && dr.dups.length) box.appendChild(h('div', { class: 'dupwarn', role: 'alert' }, h('strong', { text: 'Possible duplicate: this client has another interview with ' + b.company + '.' }),
       h('ul', null, dr.dups.map(function (x) { return h('li', { text: dupText(x) }); })), h('p', { text: 'Use ONE interview for the result. Do not release or send a second result for the same client. Tell the owner if both should stay.' })));
     var pendingCard = pendingActionCard(b); if (pendingCard) box.appendChild(pendingCard);
@@ -1095,13 +1131,14 @@
     if (Array.isArray(d.info)) d.info.forEach(function (line) { if (line && line.label && line.value) rows.push([line.label, line.value]); });
     var dl = h('dl', { class: 'kv' }); rows.forEach(function (r) { dl.appendChild(h('dt', { text: r[0] })); dl.appendChild(h('dd', { class: r[2] ? 'missing' : '', text: r[2] ? 'MISSING - ' + b.company + ' has not sent the program applied' : r[1] })); }); box.appendChild(dl);
     if (d.assessment) box.appendChild(h('p', { class: window.PIC_ENV === 'live' ? 'note' : 'mark', text: 'Template: ' + ((d.assessment.template && (d.assessment.template.label || d.assessment.template.id)) || '-') }));
-    if (isFac && !isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
+    if (isFac && !isHistory(b)) box.appendChild(docsCard(b, dr));
     var msg = h('p', { class: 'err', id: 'drawermsg', role: 'alert' });
     if (isFac && !isHistory(b)) box.appendChild(workflowCard(b, dr));
     if (dr.loadErrors && Object.keys(dr.loadErrors).length) box.appendChild(h('div', { class: 'workflow-warning', role: 'status' },
       h('strong', { text: 'Some company details could not be checked' }),
       Object.keys(dr.loadErrors).map(function (key) { return h('p', { text: key + ': ' + dr.loadErrors[key] }); })));
     box.appendChild(h('button', { class: 'btn secondary', type: 'button', text: 'Refresh company details', onclick: function () { openDrawer(b.id); } }));
+    function rememberGrades() { gradeMemo[b.id] = { grades: dr.grades, note: dr.note || '' }; }
     function run(action) {
       var payload = { action: action };
       if (action === 'mark_not_completed') { payload.params = { disposition_code: 'client_disconnected_no_rejoin' }; payload.note = INCOMPLETE_EXPLANATION; }
@@ -1112,22 +1149,24 @@
         if (need && (!dr.note || dr.note.trim().length < need)) { msg.className = 'err'; msg.textContent = 'Write a note of at least ' + need + ' characters before you submit.'; return Promise.resolve(); }
         payload.grades = gv; if (dr.note && dr.note.trim()) payload.note = dr.note.trim();
       }
-      return api('POST', '/ui/api/booking/' + b.id + '/action', payload).then(function (reply) { if (recordCompanyAction(b, action, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) {
+      var pre = (action === 'submit' && dr.grading && b.assessment_status === 'none' && dr.grading.supports_draft !== false) ? api('POST', '/ui/api/booking/' + b.id + '/action', { action: 'save_draft', grades: payload.grades, note: payload.note }) : Promise.resolve();   // one press: save the draft, then submit
+      return pre.then(function () { return api('POST', '/ui/api/booking/' + b.id + '/action', payload); }).then(function (reply) { if (action === 'submit') delete gradeMemo[b.id]; if (recordCompanyAction(b, action, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) {
         if (x.code === 'not_applicable' || /Interview Workspace/.test(String(x.message))) { msg.className = 'note'; msg.textContent = b.company + ' records grades in its own Interview Workspace and does not accept them from the Command Center yet. The request to allow it here has been sent to ' + b.company + '; until it is switched on, save or submit this assessment in the ' + b.company + ' Interview Workspace.'; return; }
-        msg.className = 'err'; msg.textContent = x.message;
+        msg.className = 'err'; msg.textContent = friendlyError(x, b);
       });
     }
     var nextAction = '';
     function act(label, action, enabled) {
+      if (dr.seeded) enabled = false;   // the company's answer has not arrived yet: nothing is pressed on a half-loaded card
       return h('button', { class: 'btn secondary' + (enabled ? (action === nextAction ? ' next' : '') : ' locked'), type: 'button', text: label, disabled: !enabled, 'aria-disabled': enabled ? null : 'true', title: enabled ? '' : 'Not available yet. See "Next step" above the buttons.', 'data-action': action, onclick: function () { if (action === 'request_advisor_confirmation') confirmAdvisor(b, d, function () { run(action); }); else if (action === 'mark_not_completed') askDialog({ title: 'Interview Not Completed', text: INCOMPLETE_EXPLANATION, kind: 'confirm' }).then(function (answer) { if (answer) run(action); }); else run(action); } });
     }
     if (dr.grading && !isHistory(b) && b.status !== 'not_completed') {
       var gcrit = dr.grading.criteria; var gmax = dr.grading.total_max || gcrit.reduce(function (n, c) { return n + c.max; }, 0); var gtotal = h('strong', { id: 'grade-total', text: '0 / ' + gmax });
       var gsum = function () { var t = 0; gcrit.forEach(function (c) { var v = dr.grades[c.id]; if (typeof v === 'number' && isFinite(v)) t += v; }); gtotal.textContent = t + ' / ' + gmax + (dr.grading.pass_mark ? ' (pass mark ' + dr.grading.pass_mark + ')' : ''); };
       box.appendChild(h('div', { class: 'card gradecard' }, h('h3', { text: 'Assessment grades' }),
-        gcrit.map(function (c) { return h('div', { class: 'field' }, h('label', { for: 'gr-' + c.id, text: c.label + ' (0 to ' + c.max + ')' }), h('input', { type: 'number', id: 'gr-' + c.id, min: '0', max: String(c.max), step: '1', value: typeof dr.grades[c.id] === 'number' ? String(dr.grades[c.id]) : '', oninput: function (e) { dr.grades[c.id] = e.target.value === '' ? undefined : Number(e.target.value); gsum(); } })); }),
-        h('div', { class: 'field' }, h('label', { for: 'gr-note', text: dr.grading.submit_note_min_length ? 'Note (required to submit, at least ' + dr.grading.submit_note_min_length + ' characters)' : 'Note (optional)' }), h('textarea', { id: 'gr-note', rows: '3', maxlength: '2000', oninput: function (e) { dr.note = e.target.value; } }, dr.note || '')),
-        h('p', null, 'Total: ', gtotal), h('p', { class: 'note', text: 'Save the draft, then submit. The company checks the grades with its own rules.' })));
+        gcrit.map(function (c) { return h('div', { class: 'field' }, h('label', { for: 'gr-' + c.id, text: c.label + ' (0 to ' + c.max + ')' }), h('input', { type: 'number', id: 'gr-' + c.id, min: '0', max: String(c.max), step: '1', value: typeof dr.grades[c.id] === 'number' ? String(dr.grades[c.id]) : '', oninput: function (e) { dr.grades[c.id] = e.target.value === '' ? undefined : Number(e.target.value); gsum(); rememberGrades(); } })); }),
+        h('div', { class: 'field' }, h('label', { for: 'gr-note', text: dr.grading.submit_note_min_length ? 'Note (required to submit, at least ' + dr.grading.submit_note_min_length + ' characters)' : 'Note (optional)' }), h('textarea', { id: 'gr-note', rows: '3', maxlength: '2000', oninput: function (e) { dr.note = e.target.value; rememberGrades(); } }, dr.note || '')),
+        h('p', null, 'Total: ', gtotal), h('p', { class: 'note', text: 'Your grades stay while you work. "Submit assessment" also saves the draft for you, so you type them once. The company checks the grades with its own rules.' })));
       gsum();
     }
     if (isHistory(b)) {
@@ -1136,23 +1175,25 @@
       var done = b.status === 'completed'; var sched = b.status === 'confirmed'; var adv = b.company === 'RGAB' ? 'Counselor' : 'advisor';
       var as = b.assessment_status; var nextStep = b.status === 'not_completed' ? INCOMPLETE_EXPLANATION + ' Ask the owning company to follow up or rebook; this interview cannot release an assessment.' : b.status === 'cancelled' || b.status === 'no_show' ? 'This interview was ' + (b.status === 'no_show' ? 'marked no-show' : 'cancelled') + '. Nothing more to press.'
         : sched ? 'Next step: when the interview is over, press "Mark interview completed" (or "Mark no-show"). The other buttons stay grey until then.'
-        : as === 'none' ? (dr.grading && dr.grading.supports_draft === false ? 'Next step: enter the grades and required note, then press "Submit assessment". This company does not use a separate draft step.' : 'Next step: enter the grades (and a note), then press "Save assessment draft". "Submit assessment" turns on after the draft is saved.')
-        : as === 'draft' ? 'Next step: check the grades and the note, then press "Submit assessment". "Send to ' + adv + ' for confirmation" turns on after you submit.'
+        : as === 'none' ? 'Next step: enter the grades (and a note), then press "Submit assessment". It saves the draft for you, so you type the grades once.'
+        : as === 'draft' ? 'Next step: check the grades (they are kept) and the note, then press "Submit assessment". "Send to ' + adv + ' for confirmation" turns on after you submit.'
         : as === 'submitted' ? 'Next step: press "Send to ' + adv + ' for confirmation".'
         : as === 'awaiting_advisor' ? 'Sent. Now waiting for the ' + adv + ' to confirm. Nothing to press until the ' + adv + ' answers; "Release result" turns on after that.'
         : as === 'approved' ? 'The ' + adv + ' confirmed. Next step: press "Release result".'
         : as === 'released' ? 'The result was released to ' + b.company + '. Check the sending schedule below and Results sent for sending and delivery reports. Do not release it again.' : '';
-      nextAction = sched ? 'complete_interview' : as === 'none' ? (dr.grading && dr.grading.supports_draft === false ? 'submit' : 'save_draft') : as === 'draft' ? 'submit' : as === 'submitted' ? 'request_advisor_confirmation' : as === 'approved' ? 'release' : '';
+      nextAction = sched ? 'complete_interview' : as === 'none' ? 'submit' : as === 'draft' ? 'submit' : as === 'submitted' ? 'request_advisor_confirmation' : as === 'approved' ? 'release' : '';
       if (nextStep) box.appendChild(h('p', { class: 'nextstep', role: 'status', text: nextStep }));
       if (isFac && !isHistory(b)) box.appendChild(h('p', { class: 'note legend', text: 'Green outline = press this one now. Dashed grey with a lock = not available yet.' }));
       box.appendChild(h('div', { class: 'actions' },
         act('Mark interview completed', 'complete_interview', sched), act('Mark no-show', 'mark_no_show', sched),
         act('Interview Not Completed', 'mark_not_completed', sched && Date.parse(b.start) <= Date.now() && !!(dr.workspace && Array.isArray(dr.workspace.actions) && dr.workspace.actions.some(function (a) { return a.id === 'mark_not_completed'; }))),
         (dr.grading && dr.grading.supports_draft === false) ? null : act('Save assessment draft', 'save_draft', done && b.assessment_status === 'none'),
-        act('Submit assessment', 'submit', done && (b.assessment_status === 'draft' || (dr.grading && dr.grading.supports_draft === false && b.assessment_status === 'none'))),
+        act('Submit assessment', 'submit', done && (b.assessment_status === 'draft' || (!!dr.grading && b.assessment_status === 'none'))),
         act('Send to ' + adv + ' for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
-        h('button', { class: 'btn' + ((done && b.assessment_status === 'approved') ? ' next' : ' locked'), type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved'), title: (done && b.assessment_status === 'approved') ? '' : 'Not available yet. See "Next step" above the buttons.', onclick: function () { confirmRelease(b, msg); } })));
+        h('button', { class: 'btn' + ((done && b.assessment_status === 'approved' && !dr.seeded) ? ' next' : ' locked'), type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved') || !!dr.seeded, title: (done && b.assessment_status === 'approved') ? '' : 'Not available yet. See "Next step" above the buttons.', onclick: function () { confirmRelease(b, msg); } })));
+      box.appendChild(flagsCard(b, dr, adv, msg));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
+    var trk = trackingCard(b); if (trk && !isHistory(b)) box.appendChild(trk);
     if (!isHistory(b)) box.appendChild(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'preview-btn', text: 'Preview assessment form (' + b.company + ' branding)', onclick: function () { showPreview(b, msg); } })));
     box.appendChild(msg);
     var wsCard = workspaceCard(b, dr, msg); if (wsCard) box.appendChild(wsCard);
@@ -1222,7 +1263,66 @@
       brandOk(p) ? null : h('p', { class: 'err', text: 'BLOCKED: this assessment is bound to a template of another company. It cannot be sent.' }));
   }
   // The client's uploaded documents, side by side. Fetched live from the owning company when opened; nothing is stored here and every view is audited.
-  function showDocuments(b) {
+  // 4: the documents are listed on the card itself, one button for each (CV, passport), not hidden behind one side-by-side button
+  function docsCard(b, dr) {
+    var items = dr.docItems; var err = dr.loadErrors && dr.loadErrors.documents;
+    var kids = [h('h3', { text: 'Client documents' })];
+    if (!items) kids.push(h('p', { class: 'note', text: err ? 'The documents could not be loaded. Press "Refresh company details".' : 'Loading the list of documents...' }));
+    else if (!items.length) kids.push(h('p', { class: 'note', text: b.company + ' has no uploaded documents for this interview (or has not switched on document viewing from the Command Center).' }));
+    else kids.push(h('div', { class: 'actions docbuttons' }, items.map(function (i) { return h('button', { class: 'btn', type: 'button', 'data-doc': i.id, text: 'Open ' + i.label, onclick: function () { showDocuments(b, i.id); } }); })));
+    kids.push(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'docs-btn', text: 'View uploaded documents side by side', onclick: function () { showDocuments(b); } })));
+    return h('div', { class: 'card doccard' }, kids);
+  }
+  // 6: where the assessment is, in the four steps the processing team asked for, then what happened to the e-mail
+  function trackingCard(b) {
+    if (!b || (b.status !== 'completed' && (!b.assessment_status || b.assessment_status === 'none'))) return null;
+    var ev = b.events || []; var at = {};
+    ev.forEach(function (e) { var k = e.event === 'assessment_status' ? 'a_' + ((e.detail || {}).to || '') : e.event; if (!at[k]) at[k] = e.at; });
+    var rank = { none: 0, draft: 1, submitted: 2, awaiting_advisor: 3, approved: 4, released: 5 }[b.assessment_status] || 0;
+    var steps = [['Interview held', b.status === 'completed' || rank > 0, at.completed],
+      ['Assessment submitted', rank >= 2, at.a_submitted],
+      ['Under review (waiting for the ' + (b.company === 'RGAB' ? 'Counselor' : 'advisor') + ' to confirm)', rank >= 4, at.a_awaiting_advisor, rank === 3],
+      ['Completed (confirmed, ready to release)', rank >= 4, at.a_approved],
+      ['Results released', rank >= 5, at.result_released || at.a_released],
+      ['E-mail sent', !!at.result_email_sent, at.result_email_sent],
+      ['E-mail delivered', !!at.result_email_delivered, at.result_email_delivered],
+      ['Opened by the client', !!at.result_opened, at.result_opened],
+      ['Client answered (' + (at.result_rejected ? 'declined' : 'accepted') + ')', !!(at.result_accepted || at.result_rejected), at.result_accepted || at.result_rejected]];
+    var firstOpen = -1; steps.forEach(function (s, i) { if (!s[1] && firstOpen < 0) firstOpen = i; });
+    return h('div', { class: 'card tracking' }, h('h3', { text: 'Assessment tracking' }),
+      h('ol', { class: 'trackinglist' }, steps.map(function (s, i) {
+        var state2 = s[1] ? 'done' : i === firstOpen ? 'current' : 'waiting';
+        return h('li', { class: 'track-' + state2 }, h('strong', { text: (s[1] ? 'Done: ' : i === firstOpen ? 'Now: ' : 'Next: ') + s[0] }), s[2] ? h('span', { class: 'note', text: ' - ' + localDate(s[2]) + ' ' + localTime(s[2]) }) : null);
+      })));
+  }
+  // 5 and 7: tell the company the interview is on now; ask it to verify a client another way when the client cannot attend the Zoom interview
+  function flagsCard(b, dr, adv, msg) {
+    var now = Date.now(); var s = Date.parse(b.start); var e = Date.parse(b.end); var evs = b.events || [];
+    var lastLive = null; var mvOpen = false; var mvDone = null;
+    evs.forEach(function (x) { if (x.event === 'interview_live') lastLive = x.at; if (x.event === 'manual_verification_requested') { mvOpen = true; mvDone = null; } else if (x.event === 'manual_verification_done') { mvOpen = false; mvDone = (x.detail || {}).outcome || 'done'; } });
+    var kids = [h('h3', { text: 'Interview status and manual verification' })];
+    if (b.status === 'confirmed') {
+      var canLive = !dr.seeded && now >= s - 15 * 60000 && now <= e + 90 * 60000;
+      kids.push(h('p', { class: now >= s && now <= e ? 'nextstep' : 'note', role: 'status', text: now >= s && now <= e ? 'This interview is happening now (' + localTime(b.start) + '-' + localTime(b.end) + ' Dubai).' : now < s ? 'Starts at ' + localTime(b.start) + ' Dubai time.' : 'The scheduled time has passed. Press "Mark interview completed" or "Mark no-show".' }));
+      kids.push(h('div', { class: 'actions' }, h('button', { class: 'btn' + (canLive ? '' : ' locked'), type: 'button', id: 'live-btn', disabled: !canLive, text: 'Interview is on now - tell the ' + adv, title: canLive ? '' : 'Available from 15 minutes before the interview until 90 minutes after it ends.', onclick: function () {
+        msg.className = 'note'; msg.textContent = 'Telling ' + b.company + '...';
+        api('POST', '/ui/api/booking/' + b.id + '/interview-live', {}).then(function (r) { msg.className = 'note'; msg.textContent = r && r.replayed ? b.company + ' was already told a few minutes ago.' : b.company + ' was told that the interview is on now.'; return openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = friendlyError(x, b); });
+      } })));
+      if (lastLive) kids.push(h('p', { class: 'note', text: b.company + ' was told at ' + localTime(lastLive) + ' that the interview is on.' }));
+    }
+    if (mvOpen) kids.push(h('p', { class: 'nextstep', role: 'status', text: 'Manual verification was asked of ' + b.company + '. Waiting for its answer (verified or not verified).' }));
+    else if (mvDone) kids.push(h('p', { class: mvDone === 'verified' ? 'nextstep' : 'err', role: 'status', text: 'Manual verification result: ' + (mvDone === 'verified' ? 'the client was verified. ' + b.company + ' completes the interview; then enter the grades as usual.' : mvDone === 'not_verified' ? 'the client could not be verified.' : 'done.') }));
+    if (!mvOpen && ['confirmed', 'no_show', 'not_completed'].indexOf(b.status) >= 0) {
+      kids.push(h('div', { class: 'actions' }, h('button', { class: 'btn secondary', type: 'button', id: 'manual-btn', disabled: !!dr.seeded, text: 'Manual interview / verification (client cannot attend the Zoom interview)', onclick: function () {
+        askDialog({ title: 'Manual interview / verification', text: 'Use this for a client who cannot attend the Zoom interview but still wants to go ahead. ' + b.company + ' is asked to verify the client another way. Nothing is sent to the client from here.', kind: 'choice', choices: [{ value: 'cannot_join_zoom', label: 'The client cannot join the Zoom interview' }, { value: 'poor_connection', label: 'Poor connection or Zoom fails' }, { value: 'no_device', label: 'The client has no camera or device' }, { value: 'other', label: 'Another reason' }] }).then(function (a) {
+          if (!a) return; msg.className = 'note'; msg.textContent = 'Asking ' + b.company + '...';
+          return api('POST', '/ui/api/booking/' + b.id + '/manual-verification', { reason_code: a.value }).then(function () { msg.className = 'note'; msg.textContent = b.company + ' was asked to verify the client manually.'; return openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = friendlyError(x, b); });
+        });
+      } })));
+    }
+    return h('div', { class: 'card flagscard' }, kids);
+  }
+  function showDocuments(b, onlyId) {
     var grid = h('div', { class: 'docgrid' }, h('p', { class: 'note', text: 'Loading documents...' })); var urls = [];
     var dlg = h('dialog', { id: 'docs-dialog', class: 'docs-dialog' },
       h('div', { class: 'docs-head' }, h('h3', { text: 'Uploaded documents - ' + (((b.details || {}).client_name) || b.company) }), h('button', { class: 'btn secondary', type: 'button', id: 'docs-close', text: 'Close', onclick: function () { dlg.close(); } })),
@@ -1236,7 +1336,8 @@
     api('GET', '/ui/api/booking/' + b.id + '/documents').then(function (l) {
       grid.textContent = '';
       if (!l.items.length) { grid.appendChild(h('p', { class: 'note', text: 'The company has no uploaded documents for this interview.' })); return; }
-      l.items.forEach(function (d) {
+      if (onlyId) dlg.classList.add('single');
+      l.items.filter(function (d) { return !onlyId || d.id === onlyId; }).forEach(function (d) {
         var body = h('div', { class: 'docbody' }, h('p', { class: 'note', text: 'Loading...' }));
         grid.appendChild(h('div', { class: 'docpanel' }, h('h4', { text: d.label }), body));
         api('GET', '/ui/api/booking/' + b.id + '/documents/' + encodeURIComponent(d.id)).then(function (f) {
@@ -1292,7 +1393,7 @@
       var recAct = ((p.workspace && p.workspace.actions) || []).filter(function (a) { return a.id === 'change_recipient'; })[0]; var recBtn = null;
       if (recAct) recBtn = h('button', { class: 'btn secondary', type: 'button', id: 'change-recipient-btn', text: recAct.label || 'Change recipient', onclick: function () {
         askDialog({ title: recAct.label || 'Change recipient', text: recAct.confirm || '', kind: 'recipient', reasonLabel: recAct.reason_label, bookingId: b.id }).then(function (params) {
-          if (!params) return; return api('POST', '/ui/api/booking/' + b.id + '/action', { action: recAct.id, params: params }).then(function () { var old = document.getElementById('release-dialog'); if (old) { old.close(); old.remove(); } confirmRelease(b, msg); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+          if (!params) return; return api('POST', '/ui/api/booking/' + b.id + '/action', { action: recAct.id, params: params }).then(function () { var old = document.getElementById('release-dialog'); if (old) { old.close(); old.remove(); } confirmRelease(b, msg); }).catch(function (x) { msg.className = 'err'; msg.textContent = friendlyError(x, b); });
         }); } });
       var dupBox = dupList.length ? h('input', { type: 'checkbox', id: 'release-dup-ok', onchange: function (e) { var cb = document.getElementById('release-confirm'); if (cb) cb.disabled = !(e.target.checked && brandOk(p)); } }) : null;
       var dupNote = dupList.length ? h('div', { class: 'dupwarn' }, h('strong', { text: 'This client has another interview:' }), h('ul', null, dupList.map(function (x) { return h('li', { text: dupText(x) }); })), h('label', null, dupBox, ' I checked: this is NOT a second result for the same client.')) : null;
@@ -1309,7 +1410,7 @@
           dlg.close(); var rbody = {}; if (pick) { if (nowBox && nowBox.checked) rbody.send_now = true; else rbody.send_after_hours = parseInt(pick.value, 10); } api('POST', '/ui/api/booking/' + b.id + '/release', rbody).then(function (r) { var pending = recordCompanyAction(b, 'release', r); msg.className = pending ? 'note' : 'ok'; msg.textContent = pending ? 'Company verification is pending. Refresh the current interview to check its status.' : 'Release recorded by ' + b.company + '. ' + (r.delivery || 'Check the company result queue for the sending status.'); if (pending) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = x.code === 'controls_disabled' ? 'Releases are frozen by management.' : x.code === 'incorrect_template' ? 'Blocked: wrong company template. An incident was recorded.' : x.message; });
         } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { dlg.close(); } })));
       document.body.appendChild(dlg); dlg.addEventListener('close', function () { disposePreviews(dlg); dlg.remove(); }); dlg.showModal();
-    }).catch(function (x) { msg.className = 'err'; msg.textContent = x.message; });
+    }).catch(function (x) { msg.className = 'err'; msg.textContent = friendlyError(x, b); });
   }
 
   // ------------------------------------------------------------ shell

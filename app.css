@@ -573,3 +573,16 @@ nav.tabs button[aria-selected=true] { background: linear-gradient(110deg, #17274
 @media (max-width: 760px) { .worldclock { order: 5; width: 100%; margin-right: 0; } }
 @media (max-width: 1560px) { .worldclock .wc:nth-child(n+7) { display: none; } }
 @media (max-width: 1250px) { .worldclock .wc:nth-child(n+5) { display: none; } }
+
+/* 27 Oct 2026: documents, tracking, interview flags, problems to fix */
+.doccard .docbuttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.doccard .docbuttons .btn { font-weight: 600; }
+.docs-dialog.single .docgrid { grid-template-columns: 1fr; }
+.trackinglist { list-style: none; margin: 0; padding: 0; }
+.trackinglist li { padding: 6px 10px; margin: 4px 0; border-left: 4px solid var(--line, #888); border-radius: 4px; }
+.trackinglist li.track-done { border-left-color: var(--ok, #2a7d46); }
+.trackinglist li.track-current { border-left-color: var(--warn, #b7791f); background: color-mix(in srgb, var(--warn, #b7791f) 10%, transparent); }
+.trackinglist li.track-waiting { opacity: .65; }
+.workflow-problems { margin: 12px 16px; padding: 12px; border: 2px solid var(--warn, #b7791f); border-radius: 10px; background: color-mix(in srgb, var(--warn, #b7791f) 10%, var(--panel, transparent)); overflow-wrap: anywhere; }
+.workflow-problems ul { margin: 6px 0 0; padding-left: 18px; }
+.flagscard .actions { margin-top: 8px; }
