@@ -1108,6 +1108,7 @@
         if (state.drawer !== dr) return; var items = (dd && dd.items) || []; var x = state.drawer.extra = state.drawer.extra || {};
         var txt = items.length ? items.map(function (i) { return i.label; }).join(', ') : 'None uploaded'; state.drawer.docItems = items; x.docs = txt; softRender();
       }).catch(function (e) { failed('documents', e); }).then(settle);
+      if (isFacRole && !isHistory(b) && ['released'].indexOf(b.assessment_status) >= 0 && !dr.recipients) api('GET', '/ui/api/booking/' + id + '/recipients').then(function (r) { if (state.drawer === dr && r) { dr.recipients = r; softRender(); } }).catch(function () {});
       if (isFacRole && b.company === 'RGAB' && !isHistory(b)) api('GET', '/ui/api/lists/confirmations?company=RGAB').then(function (r) {
         if (state.drawer !== dr) return; var sec = (r.sections || [])[0]; if (sec && sec.error) { failed('confirmations', new Error(sec.code === 'outside_hours' ? 'Confirmation details are available from 10:00 AM to 10:00 PM Dubai time.' : 'The company could not supply confirmation details. Press Retry.')); return; } var row = sec && (sec.rows || []).filter(function (q) { return q.booking_id === id; })[0]; if (!row) return;
         var x = state.drawer.extra = state.drawer.extra || {}; var st = row.cells && row.cells.state; if (st && x.confirmation !== st) { x.confirmation = st; softRender(); }
@@ -1293,11 +1294,16 @@
       ['E-mail delivered', !!at.result_email_delivered, at.result_email_delivered],
       ['Opened by the client', !!at.result_opened, at.result_opened],
       ['Client answered (' + (at.result_rejected ? 'declined' : 'accepted') + ')', !!(at.result_accepted || at.result_rejected), at.result_accepted || at.result_rejected]];
+    var rc = state.drawer && state.drawer.recipients; var ROLE = { client: 'the client', counselor: 'the Counselor', advisor: 'the advisor', team_leader: 'the Team Leader', sales_advisor: 'the client\'s sales advisor', management: 'management', other: 'others' };
+    var missingRoles = rc && Array.isArray(rc.roles) ? (rc.required || []).filter(function (r) { return rc.roles.indexOf(r) < 0; }) : [];
+    var rcNote = rc && rc.sent ? (Array.isArray(rc.roles) ? 'Sent to: ' + rc.roles.map(function (r) { return ROLE[r] || r; }).join(', ') + '.' : 'The company has not said who was on the e-mail yet.') : '';
     var firstOpen = -1; steps.forEach(function (s, i) { if (!s[1] && firstOpen < 0) firstOpen = i; });
     return h('div', { class: 'card tracking' }, h('h3', { text: 'Assessment tracking' }),
       h('ol', { class: 'trackinglist' }, steps.map(function (s, i) {
         var state2 = s[1] ? 'done' : i === firstOpen ? 'current' : 'waiting';
-        return h('li', { class: 'track-' + state2 }, h('strong', { text: (s[1] ? 'Done: ' : i === firstOpen ? 'Now: ' : 'Next: ') + s[0] }), s[2] ? h('span', { class: 'note', text: ' - ' + localDate(s[2]) + ' ' + localTime(s[2]) }) : null);
+        return h('li', { class: 'track-' + state2 }, h('strong', { text: (s[1] ? 'Done: ' : i === firstOpen ? 'Now: ' : 'Next: ') + s[0] }), s[2] ? h('span', { class: 'note', text: ' - ' + localDate(s[2]) + ' ' + localTime(s[2]) }) : null,
+          s[0] === 'E-mail sent' && rcNote ? h('div', { class: 'note', text: rcNote }) : null,
+          s[0] === 'E-mail sent' && missingRoles.length ? h('div', { class: 'err', role: 'alert', text: 'NOT on the e-mail: ' + missingRoles.map(function (r) { return ROLE[r] || r; }).join(', ') + '. What to do: tell the owner now so the company can send it to them (this has happened before).' }) : null);
       })));
   }
   // 5 and 7: tell the company the interview is on now; ask it to verify a client another way when the client cannot attend the Zoom interview
