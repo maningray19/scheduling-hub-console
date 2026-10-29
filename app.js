@@ -1298,12 +1298,14 @@
     var rc = state.drawer && state.drawer.recipients; var ROLE = { client: 'the client', counselor: 'the Counselor', advisor: 'the advisor', team_leader: 'the Team Leader', sales_advisor: 'the client\'s sales advisor', management: 'management', other: 'others' };
     var missingRoles = rc && Array.isArray(rc.roles) ? (rc.required || []).filter(function (r) { return rc.roles.indexOf(r) < 0; }) : [];
     var rcNote = rc && rc.sent ? (Array.isArray(rc.roles) ? 'Sent to: ' + rc.roles.map(function (r) { return ROLE[r] || r; }).join(', ') + '.' : 'The company has not said who was on the e-mail yet.') : '';
+    var resends = ev.filter(function (e) { return e.event === 'result_send_requested'; });
     var firstOpen = -1; steps.forEach(function (s, i) { if (!s[1] && firstOpen < 0) firstOpen = i; });
     return h('div', { class: 'card tracking' }, h('h3', { text: 'Assessment tracking' }),
       h('ol', { class: 'trackinglist' }, steps.map(function (s, i) {
         var state2 = s[1] ? 'done' : i === firstOpen ? 'current' : 'waiting';
         return h('li', { class: 'track-' + state2 }, h('strong', { text: (s[1] ? 'Done: ' : i === firstOpen ? 'Now: ' : 'Next: ') + s[0] }), s[2] ? h('span', { class: 'note', text: ' - ' + localDate(s[2]) + ' ' + localTime(s[2]) }) : null,
           s[0] === 'E-mail sent' && rcNote ? h('div', { class: 'note', text: rcNote }) : null,
+          s[0] === 'E-mail sent' && resends.length ? h('div', { class: 'note', text: 'Sent again (resend, send now or correction) ' + resends.length + ' time' + (resends.length === 1 ? '' : 's') + ', last on ' + localDate(resends[resends.length - 1].at) + ' ' + localTime(resends[resends.length - 1].at) + '.' }) : null,
           s[0] === 'E-mail sent' && missingRoles.length ? h('div', { class: 'err', role: 'alert', text: 'NOT on the e-mail: ' + missingRoles.map(function (r) { return ROLE[r] || r; }).join(', ') + '. What to do: tell the owner now so the company can send it to them (this has happened before).' }) : null);
       })));
   }
