@@ -686,6 +686,7 @@
     if (d.documents && /missing|none|no/i.test(String(d.documents.cv || ''))) list.push(['The CV is not uploaded.', 'Ask the ' + who + ' to upload the CV before the interview.']);
     Object.keys(dr.loadErrors || {}).forEach(function (k) { list.push([k.charAt(0).toUpperCase() + k.slice(1) + ' could not be checked: ' + dr.loadErrors[k], 'Press "Refresh company details". If it fails again, tell the owner.']); });
     if (b.assessment_status === 'awaiting_advisor' && !model.stopped) list.push(['The ' + who + ' has not confirmed in the ' + b.company + ' portal yet (a verbal "yes" does not count).', 'Ask the ' + who + ' to press Confirm in the portal, or press "Remind the ' + who + ' to confirm" in step 5.']);
+    if (b.status === 'confirmed' && b.assessment_status === 'approved') list.push(['This interview has not been held, but its assessment shows "approved". ' + b.company + ' reported it too early (no grades exist).', 'After the interview, enter the grades and check the result before you release. Never release a result without grades. Tell the owner so the company can reset it.']);
     if (!list.length) return null;
     return h('div', { class: 'workflow-problems', role: 'alert' }, h('strong', { text: 'Fix this first (' + list.length + ')' }), h('ul', null, list.map(function (p) { return h('li', null, h('span', { text: p[0] + ' ' }), h('strong', { text: 'What to do: ' }), h('span', { text: p[1] })); })));
   }
