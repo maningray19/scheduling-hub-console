@@ -89,6 +89,7 @@ main { padding: 18px 22px 60px; max-width: 1320px; margin: 0 auto; }
 .ev.cancelled .l1 > span:not(.co):not(.note) { text-decoration: line-through; }
 .ev .l1 { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.result-wait-timer { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .chip { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--muted); }
 .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 11%, transparent); }
 .chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 11%, transparent); }

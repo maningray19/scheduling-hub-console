@@ -372,6 +372,19 @@
     accepted: ['Accepted', 'ok'], rejected: ['Rejected', 'bad'], ignored: ['Ignored', 'warn'], opened: ['Opened', ''], delivered: ['Delivered', ''], sent: ['Sent', ''],
     bounced: ['Not delivered', 'bad'], waiting_for_company: ['Waiting for company report', 'warn']
   };
+  function resultWaitText(releasedAt, now) {
+    var started = Date.parse(releasedAt); var current = now === undefined ? Date.now() : now;
+    if (!Number.isFinite(started)) return 'Waiting time unavailable';
+    if (started > current) return 'Release time is in the future';
+    var minutes = Math.floor((current - started) / 60000);
+    return 'Waiting ' + Math.floor(minutes / 60) + 'h ' + pad(minutes % 60) + 'm since release';
+  }
+  function updateResultWaitTimers() {
+    var now = Date.now();
+    document.querySelectorAll('[data-result-wait-since]').forEach(function (el) {
+      el.textContent = resultWaitText(el.getAttribute('data-result-wait-since'), now);
+    });
+  }
   // Reporting periods in Dubai time. Weeks run Monday to Sunday; months are calendar months. Returns [first day, day after the last day].
   var RES_PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['lastweek', 'Last week'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['month', 'This month'], ['lastmonth', 'Last month'], ['custom', 'Custom range']];
   function resRange() {
@@ -510,10 +523,11 @@
         h('td', { text: ev.email_bounced && !delivered ? 'Not delivered' : delivered ? 'Delivered' : ev.email_sent ? 'Sent' : '-' }),
         h('td', { text: ev.opened || ev.accepted || ev.rejected ? 'Yes' + (ev.opened ? ' - ' + when('opened') : '') : 'No' }),
         h('td', { text: ev.accepted ? 'Accepted ' + when('accepted') : ev.rejected ? 'Rejected ' + when('rejected') : '-' }),
-        h('td', null, h('span', { class: 'chip ' + st[1], text: st[0] })));
+        h('td', null, h('span', { class: 'chip ' + st[1], text: st[0] }),
+          i.state === 'waiting_for_company' ? h('small', { class: 'result-wait-timer', 'data-result-wait-since': i.released_at || '', title: 'Elapsed since release, not an email delivery countdown. Released: ' + (i.released_at ? localDate(i.released_at) + ' ' + localTime(i.released_at) + ' Dubai time' : 'unknown'), text: resultWaitText(i.released_at) }) : null));
     });
     var sent = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Sent items (' + r.items.length + ')' }),
-      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent; it is only counted for a company whose system reports client answers' + ((r.answers_tracked_by || []).length ? ' (now: ' + r.answers_tracked_by.join(', ') + ')' : ' (none yet)') + '. "Waiting for company report" means the result was released but the company system has not reported on it yet.' }),
+      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent; it is only counted for a company whose system reports client answers' + ((r.answers_tracked_by || []).length ? ' (now: ' + r.answers_tracked_by.join(', ') + ')' : ' (none yet)') + '. "Waiting for company report" means the result was released but the company system has not reported on it yet. The waiting timer counts hours and minutes since release and updates every minute; it is not an email delivery countdown.' }),
       r.items.length ? h('table', null, h('thead', null, h('tr', null, ['Sent', 'Company', 'Client', 'Interview', 'E-mail', 'Opened', 'Client answer', 'Status'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
         : h('p', { class: 'note', text: 'No results were sent in this period.' }));
     return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
@@ -1825,6 +1839,7 @@
     }).catch(function () {});
   }
   checkVersion(); setInterval(checkVersion, 60000);
+  setInterval(updateResultWaitTimers, 60000);
   var backgroundBusy = false;
   setInterval(function () {
     if (state.user && state.drawer) { quietDrawer(); return; }
