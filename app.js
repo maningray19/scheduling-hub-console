@@ -431,6 +431,41 @@
     }));
     return downloadCsv('ranking_' + rg[0] + '_to_' + addDays(rg[1], -1) + (state.company ? '_' + state.company : '') + '.csv', rows, 'ranking');
   }
+  // ---- item by item (owner request, 31 Oct 2026): every number can be opened, and the list is counted against the number
+  function resEv(i) { return i.outside_events || i.events || {}; }   // the result reports: the core's, or the company's own record for a result it sent from its own system
+  function resSentOut(i) { return !!(i.released_at || i.sent_outside); }
+  function resDeliv(ev) { return !!(ev.email_delivered || ev.opened || ev.accepted || ev.rejected); }
+  var RES_PIPE = { completed: ['Interviews completed', function (i) { return i.status === 'completed'; }], noshow: ['No-show', function (i) { return i.status === 'no_show'; }], notcompleted: ['Interview not completed', function (i) { return i.status === 'not_completed'; }],
+    written: ['Assessments written', function (i) { return ['completed', 'no_show', 'not_completed'].indexOf(i.status) >= 0 && ['submitted', 'awaiting_advisor', 'approved', 'released'].indexOf(i.assessment_status) >= 0; }],
+    ready: ['Ready to send (approved, not sent from anywhere)', function (i) { return i.status === 'completed' && i.assessment_status === 'approved' && !resSentOut(i); }] };
+  var RES_SENT = { sent: ['Results sent', function () { return true; }], delivered: ['Received (e-mail delivered)', function (i) { return resDeliv(resEv(i)); }], opened: ['Opened', function (i) { var e = resEv(i); return !!(e.opened || e.accepted || e.rejected); }],
+    accepted: ['Accepted', function (i) { return !!resEv(i).accepted; }], rejected: ['Rejected', function (i) { return !!resEv(i).rejected; }], ignored: ['Ignored', function (i) { return i.state === 'ignored'; }],
+    bounced: ['Not delivered', function (i) { return i.state === 'bounced'; }], waiting: ['Waiting for company report', function (i) { return i.state === 'waiting_for_company'; }] };
+  function resItemRow(i) {
+    var ev = resEv(i); var d = function (k) { return ev[k] ? localDate(ev[k]) + ' ' + localTime(ev[k]) : ''; }; var out = []; var at = i.released_at || i.outside_released_at;
+    if (at) out.push((i.sent_outside ? 'Sent from the company\'s own system ' : 'Released ') + localDate(at) + ' ' + localTime(at));
+    if (ev.email_sent) out.push('e-mail sent ' + d('email_sent')); if (ev.email_delivered || resDeliv(ev)) out.push('delivered' + (d('email_delivered') ? ' ' + d('email_delivered') : '')); if (ev.opened) out.push('opened ' + d('opened'));
+    if (ev.accepted) out.push('ACCEPTED ' + d('accepted')); if (ev.rejected) out.push('REJECTED ' + d('rejected')); if (ev.email_bounced && !resDeliv(ev)) out.push('NOT DELIVERED');
+    var notes = []; var now = Date.now(); var startMs = Date.parse(i.start);
+    if (i.status === 'confirmed' && i.assessment_status === 'approved') notes.push('Approved before the interview was held (company reported it too early)');
+    if (i.status === 'completed' && i.assessment_status === 'approved' && !resSentOut(i) && isFinite(startMs) && now - startMs > 24 * 3600000) notes.push('Ready to send for ' + Math.round((now - startMs) / 3600000) + ' h');
+    if (i.released_at && !ev.email_sent && now - Date.parse(i.released_at) > 26 * 3600000) notes.push('No sent report from the company yet');
+    var mixed = i.sent_outside ? 'Sent natively, not recorded as a release here' : '';
+    if (mixed) notes.push(mixed);
+    var who = i.client_name || (i.details_unavailable ? 'Details unavailable' : (i.history ? 'Client ' + String(i.client_ref || '').slice(0, 10) + ' (earlier record)' : '-'));
+    return h('tr', null, h('td', { text: localDate(i.start) + ' ' + localTime(i.start) }), h('td', null, h('span', { class: 'co ' + i.company, text: i.company })), h('td', { text: who }), h('td', { text: i.advisor_name || (i.advisor_ref ? 'Staff ' + String(i.advisor_ref).slice(0, 8) : '-') }),
+      h('td', { text: statusLabel(i.status || 'completed') }), h('td', { text: ASSESS[i.assessment_status] || (i.state ? 'Released' : '-') }), h('td', { text: out.join(' - ') || '-' }), h('td', { class: notes.length ? 'warn' : '', text: notes.join('. ') }));
+  }
+  function resAgo(iso) { if (!iso) return 'no report yet'; var m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; }
+  function resFreshLine() {
+    var x = state.tabData.resItems; if (!x || !x.freshness) return null; var f = x.freshness.companies || {}; var parts = [];
+    ['RGOS', 'RGAB'].filter(function (co) { return !state.company || state.company === co; }).forEach(function (co) {
+      var c = f[co] || {}; var last = [c.last_report_at, c.last_history_at].filter(Boolean).sort().pop();
+      parts.push(co + ': last company report ' + resAgo(last) + (c.waiting_over_24h ? ', ' + c.waiting_over_24h + ' result' + (c.waiting_over_24h === 1 ? '' : 's') + ' waiting over 24 h for a sent report' : ''));
+    });
+    var warn = ['RGOS', 'RGAB'].some(function (co) { return (f[co] || {}).waiting_over_24h > 0; });
+    return h('p', { class: 'note freshline' + (warn ? ' warn' : ''), role: 'status', id: 'res-fresh', text: 'Live: this page updates itself every 30 seconds (last update ' + new Date(state.resItemsAt || Date.now()).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dubai', hour12: false }) + ' Dubai). ' + parts.join('. ') + '.' });
+  }
   function resultsTab() {
     var r = state.tabData.results;
     var preset = h('select', { id: 'res-preset', 'aria-label': 'Reporting period', onchange: function (e) { state.resPreset = e.target.value; refreshTab(); } }, RES_PRESETS.map(function (o) { return h('option', { value: o[0], text: o[1], selected: (state.resPreset || '30d') === o[0] }); }));
@@ -443,17 +478,38 @@
     var c = r.counts, p = r.pipeline;
     function pct(n) { return c.released ? Math.round(100 * n / c.released) + '% of sent' : ''; }
     function tile(cls, num, lbl, sub) { return h('div', { class: 'stat ' + cls }, h('span', { class: 'num', text: String(num) }), h('span', { class: 'lbl', text: lbl }), sub ? h('span', { class: 'note', text: sub }) : null); }
+    var itx = state.tabData.resItems && Array.isArray(state.tabData.resItems.items) ? state.tabData.resItems.items : null;
+    var readyN = itx ? itx.filter(RES_PIPE.ready[1]).length : p.approved_not_released;
+    function tile(cls, num, lbl, sub, key) {
+      var on = state.resBucket === key; var go = function () { state.resBucket = on ? '' : key; renderMain(); };
+      return h('div', { class: 'stat ' + cls + (key ? ' clickable' : '') + (on ? ' selected' : ''), role: key ? 'button' : null, tabindex: key ? '0' : null, 'aria-pressed': key ? String(on) : null, 'data-bucket': key || null, title: key ? 'Show every item behind this number' : '', onclick: key ? go : null, onkeydown: key ? function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } } : null },
+        h('span', { class: 'num', text: String(num) }), h('span', { class: 'lbl', text: lbl }), sub ? h('span', { class: 'note', text: sub }) : null);
+    }
     var tiles = h('div', { class: 'stats' },
-      tile('s-ALL', p.interviews_completed, 'Interviews completed', (p.no_show ? p.no_show + ' no-show' : '') + (p.not_completed ? (p.no_show ? ', ' : '') + p.not_completed + ' not completed' : '')),
-      tile('s-ALL', p.assessment_submitted, 'Assessments written', p.with_advisor + ' with an advisor, ' + p.approved_not_released + ' ready to send'),
-      tile('s-ALL', c.released, 'Results sent', 'released from here'),
-      tile('s-ALL', c.delivered, 'Received (e-mail delivered)', pct(c.delivered)),
-      tile('s-ALL', c.opened, 'Opened', pct(c.opened)),
-      tile('s-RGAB', c.accepted, 'Accepted', pct(c.accepted)),
-      tile('s-ATT', c.rejected, 'Rejected', pct(c.rejected)),
-      tile('s-ATT', c.ignored, 'Ignored', 'no answer after ' + r.ignore_after_days + ' days'),
-      tile('s-ATT', c.bounced, 'Not delivered', 'bounced or failed'),
-      tile('s-ATT', c.waiting_for_company, 'Waiting for company report', 'sent, but the company has not reported yet'));
+      tile('s-ALL', p.interviews_completed, 'Interviews completed', 'tap to see each one', 'completed'),
+      tile('s-ATT', p.no_show, 'No-show', '', 'noshow'), tile('s-ATT', p.not_completed, 'Not completed', '', 'notcompleted'),
+      tile('s-ALL', p.assessment_submitted, 'Assessments written', p.with_advisor + ' waiting for the ' + 'advisor / counselor', 'written'),
+      tile('s-ATT', readyN, 'Ready to send', 'approved, not sent from anywhere', 'ready'),
+      tile('s-ALL', c.released, 'Results sent', 'released from here or by the company', 'sent'),
+      tile('s-ALL', c.delivered, 'Received (e-mail delivered)', pct(c.delivered), 'delivered'),
+      tile('s-ALL', c.opened, 'Opened', pct(c.opened), 'opened'),
+      tile('s-RGAB', c.accepted, 'Accepted', pct(c.accepted), 'accepted'),
+      tile('s-ATT', c.rejected, 'Rejected', pct(c.rejected), 'rejected'),
+      tile('s-ATT', c.ignored, 'Ignored', 'no answer after ' + r.ignore_after_days + ' days', 'ignored'),
+      tile('s-ATT', c.bounced, 'Not delivered', 'bounced or failed', 'bounced'),
+      tile('s-ATT', c.waiting_for_company, 'Waiting for company report', 'sent, but the company has not reported yet', 'waiting'));
+    // the items behind the chosen number, counted against that number (a difference is shown, never hidden)
+    var bk = state.resBucket || ''; var itemsCard = null;
+    if (bk && (RES_PIPE[bk] || RES_SENT[bk])) {
+      var isPipe = !!RES_PIPE[bk]; var def = isPipe ? RES_PIPE[bk] : RES_SENT[bk];
+      var expected = { completed: p.interviews_completed, noshow: p.no_show, notcompleted: p.not_completed, written: p.assessment_submitted, ready: readyN, sent: c.released, delivered: c.delivered, opened: c.opened, accepted: c.accepted, rejected: c.rejected, ignored: c.ignored, bounced: c.bounced, waiting: c.waiting_for_company }[bk];
+      var src = isPipe ? itx : r.items; var list = src ? src.filter(def[1]) : null;
+      var check = !list ? h('p', { class: 'note', text: 'Loading the items...' }) : list.length === expected ? h('p', { class: 'note ok', role: 'status', text: 'Counted: ' + list.length + ' items, the same as the number above.' })
+        : h('p', { class: 'err', role: 'alert', text: 'The list shows ' + list.length + ' items but the number above says ' + expected + '. Tell the owner: one of the two is wrong.' });
+      itemsCard = h('div', { class: 'card scroll-x', id: 'res-items' }, h('h2', { text: def[0] + (list ? ' (' + list.length + ')' : '') }), check,
+        h('p', { class: 'note', text: 'Each row is one interview. Times are Dubai time. Tap the same number again to close this list.' }),
+        list && list.length ? h('table', null, h('thead', null, h('tr', null, ['Interview', 'Company', 'Client', 'Advisor / Counselor', 'Interview', 'Assessment', 'Result e-mail', 'Notes'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, list.map(resItemRow))) : (list ? h('p', { class: 'note', text: 'Nothing in this period.' }) : null));
+    }
     var steps = [['Interviews completed', p.interviews_completed], ['Assessments written', p.assessment_submitted], ['Results sent', c.released], ['Delivered', c.delivered], ['Opened', c.opened], ['Accepted', c.accepted]];
     var top = Math.max(1, p.interviews_completed, p.assessment_submitted, c.released);
     var funnel = h('div', { class: 'card' }, h('h2', { text: 'From interview to answer' }), steps.map(function (s) {
@@ -530,7 +586,7 @@
       h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent; it is only counted for a company whose system reports client answers' + ((r.answers_tracked_by || []).length ? ' (now: ' + r.answers_tracked_by.join(', ') + ')' : ' (none yet)') + '. "Waiting for company report" means the result was released but the company system has not reported on it yet. The waiting timer counts hours and minutes since release and updates every minute; it is not an email delivery countdown.' }),
       r.items.length ? h('table', null, h('thead', null, h('tr', null, ['Sent', 'Company', 'Client', 'Interview', 'E-mail', 'Opened', 'Client answer', 'Status'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
         : h('p', { class: 'note', text: 'No results were sent in this period.' }));
-    return h('div', null, bar, state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
+    return h('div', null, bar, resFreshLine(), state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, itemsCard, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
   }
 
   // ------------------------------------------------------------ notices (the owner writes, the facilitator reads and presses "Got it")
@@ -1789,7 +1845,7 @@
     if (!state.user) { root.appendChild(loginView()); return; }
     root.appendChild(mainShell()); renderMain();
   }
-  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll, state.tabData.list_confirmations, state.tabData.list_offers]); }
+  function snap() { return JSON.stringify([state.items, state.wide, state.tabData.results, (state.tabData.resItems || {}).items, state.tabData.resItems && state.tabData.resItems.freshness ? Math.floor(Date.parse(state.tabData.resItems.freshness.checked_at) / 60000) : 0, state.tabData.incidents, state.tabData.audit, state.tabData.report, state.notices, state.tabData.noticesAll, state.tabData.list_confirmations, state.tabData.list_offers]); }
   var refreshGeneration = 0;
   function refreshTab(quiet) {
     var generation = quiet ? refreshGeneration : ++refreshGeneration;
@@ -1799,7 +1855,8 @@
     if (t === 'calendar') { jobs.push(loadCalendar(!!quiet)); if (!limited()) jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; }).catch(function () {})); }
     if (t === 'queues') jobs.push(loadWide());
     if (t === 'confirmations' || t === 'offers') jobs.push(api('GET', '/ui/api/lists/' + t + (state.company ? '?company=' + state.company : '')).then(function (x) { state.tabData['list_' + t] = x; }).catch(function (e) { if (state.tab === t && generation === refreshGeneration) state.error = e.message; }));
-    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (state.tab === t && generation === refreshGeneration && rq === resKey()) { state.tabData.results = x; state.error = ''; } }).catch(function (e) { if (state.tab === t && generation === refreshGeneration && rq === resKey()) state.error = e.message || 'Could not load.'; })); }
+    if (t === 'results') { var rr = resRange(); var rq = '/ui/api/results?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : ''); jobs.push(api('GET', '/ui/api/result-items?from=' + encodeURIComponent(isoStart(rr[0])) + '&to=' + encodeURIComponent(isoStart(rr[1])) + (state.company ? '&company=' + state.company : '')).then(function (x) { state.tabData.resItems = x; state.resItemsAt = Date.now(); }).catch(function () {}));
+      jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (state.tab === t && generation === refreshGeneration && rq === resKey()) { state.tabData.results = x; state.error = ''; } }).catch(function (e) { if (state.tab === t && generation === refreshGeneration && rq === resKey()) state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
@@ -1876,6 +1933,7 @@
     loadControls().then(function () {
       if (session !== liveSession || !liveSafe()) return;
       if (JSON.stringify(state.controls) !== before) return refreshAll();
+      if (state.tab === 'results' && !state.drawer && Date.now() - (state.resItemsAt || 0) > 30000) return refreshTab(true);   // the reporting page keeps itself current (every 30 s)
       if ((limited() || live.unsupported) && ['calendar', 'queues', 'results', 'management'].indexOf(state.tab) >= 0) return refreshTab(true);
     }).catch(function () {}).finally(function () { backgroundBusy = false; });
   }, 15000);

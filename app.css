@@ -587,3 +587,11 @@ nav.tabs button[aria-selected=true] { background: linear-gradient(110deg, #17274
 .workflow-problems { margin: 12px 16px; padding: 12px; border: 2px solid var(--warn, #b7791f); border-radius: 10px; background: color-mix(in srgb, var(--warn, #b7791f) 10%, var(--panel, transparent)); overflow-wrap: anywhere; }
 .workflow-problems ul { margin: 6px 0 0; padding-left: 18px; }
 .flagscard .actions { margin-top: 8px; }
+
+/* 31 Oct 2026: itemized report */
+.stat.clickable { cursor: pointer; }
+.stat.clickable:focus-visible { outline: 3px solid var(--brand, #0e7490); outline-offset: 2px; }
+.stat.selected { outline: 3px solid var(--brand, #0e7490); }
+.freshline.warn { color: var(--warn, #b7791f); font-weight: 600; }
+#res-items td.warn { color: var(--warn, #b7791f); font-weight: 600; }
+#res-items .note.ok { color: var(--ok, #2a7d46); font-weight: 600; }
