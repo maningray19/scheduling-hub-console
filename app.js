@@ -464,7 +464,9 @@
       parts.push(co + ': last company report ' + resAgo(last) + (c.waiting_over_24h ? ', ' + c.waiting_over_24h + ' result' + (c.waiting_over_24h === 1 ? '' : 's') + ' waiting over 24 h for a sent report' : ''));
     });
     var warn = ['RGOS', 'RGAB'].some(function (co) { return (f[co] || {}).waiting_over_24h > 0; });
-    return h('p', { class: 'note freshline' + (warn ? ' warn' : ''), role: 'status', id: 'res-fresh', text: 'Live: this page updates itself every 30 seconds (last update ' + new Date(state.resItemsAt || Date.now()).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dubai', hour12: false }) + ' Dubai). ' + parts.join('. ') + '.' });
+    var lag = { RGAB: 'RGAB: sent or not delivered about 2 minutes after the e-mail goes out. Delivered, opened, accepted and rejected only appear when the client reacts (RGAB has no delivery receipts: they are proofs, with the time of the proof), then about 15 minutes later.', RGOS: 'RGOS: each event is reported within about a minute once the result is sent, opened or answered. Results RGOS sent from its own system earlier are taken from its results history.' };
+    return h('div', { class: 'freshbox' }, h('p', { class: 'note freshline' + (warn ? ' warn' : ''), role: 'status', id: 'res-fresh', text: 'Live: this page updates itself every 30 seconds (last update ' + new Date(state.resItemsAt || Date.now()).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dubai', hour12: false }) + ' Dubai). ' + parts.join('. ') + '.' }),
+      h('details', { class: 'note' }, h('summary', { text: 'How current are these numbers?' }), ['RGOS', 'RGAB'].filter(function (co) { return !state.company || state.company === co; }).map(function (co) { return h('p', { text: lag[co] }); }), h('p', { text: 'A number is only as current as what the company has reported. If the last company report is old, or results wait more than 24 hours for a sent report, tell the owner.' })));
   }
   function resultsTab() {
     var r = state.tabData.results;
