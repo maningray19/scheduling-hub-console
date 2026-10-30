@@ -696,6 +696,11 @@
         return h('li', null, h('span', { class: 'workflow-overview-number', 'aria-hidden': 'true', text: ('0' + (index + 1)).slice(-2) }), h('span', { text: label }));
       })), message);
   }
+  // the company says this result e-mail was already sent (for example from its own queue before the Command Center took over): releasing again could send a second e-mail
+  function mailAlreadySent(dr) {
+    var s = dr && dr.workspace && dr.workspace.result_email ? String(dr.workspace.result_email.state || '').toLowerCase() : '';
+    return ['sent', 'delivered', 'opened', 'accepted', 'rejected'].indexOf(s) >= 0;
+  }
   // plain words for an error, always with what to do next
   function friendlyError(x, b) {
     var m = String((x && x.message) || '').trim(); var c = (x && x.code) || ''; var st = x && x.status; var co = b && b.company ? b.company : 'The company';
@@ -721,6 +726,7 @@
     Object.keys(dr.loadErrors || {}).forEach(function (k) { list.push([k.charAt(0).toUpperCase() + k.slice(1) + ' could not be checked: ' + dr.loadErrors[k], 'Press "Refresh company details". If it fails again, tell the owner.']); });
     if (b.assessment_status === 'awaiting_advisor' && !model.stopped) list.push(['The ' + who + ' has not confirmed in the ' + b.company + ' portal yet (a verbal "yes" does not count).', 'Ask the ' + who + ' to press Confirm in the portal, or press "Remind the ' + who + ' to confirm" in step 5.']);
     if (b.status === 'confirmed' && b.assessment_status === 'approved') list.push(['This interview has not been held, but its assessment shows "approved". ' + b.company + ' reported it too early (no grades exist).', 'After the interview, enter the grades and check the result before you release. Never release a result without grades. Tell the owner so the company can reset it.']);
+    if (mailAlreadySent(dr) && b.assessment_status === 'approved') list.push([b.company + ' says the result e-mail for this interview was ALREADY SENT (' + String((dr.workspace.result_email || {}).label || '') + '), although this card still says approved.', 'Do NOT release or resend. Tell the owner so the company records the release in the Command Center.']);
     if (!list.length) return null;
     return h('div', { class: 'workflow-problems', role: 'alert' }, h('strong', { text: 'Fix this first (' + list.length + ')' }), h('ul', null, list.map(function (p) { return h('li', null, h('span', { text: p[0] + ' ' }), h('strong', { text: 'What to do: ' }), h('span', { text: p[1] })); })));
   }
@@ -1231,7 +1237,7 @@
         (dr.grading && dr.grading.supports_draft === false) ? null : act('Save assessment draft', 'save_draft', done && b.assessment_status === 'none'),
         act('Submit assessment', 'submit', done && (b.assessment_status === 'draft' || (!!dr.grading && b.assessment_status === 'none'))),
         act('Send to ' + adv + ' for confirmation', 'request_advisor_confirmation', done && b.assessment_status === 'submitted'),
-        h('button', { class: 'btn' + ((done && b.assessment_status === 'approved' && !dr.seeded) ? ' next' : ' locked'), type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved') || !!dr.seeded, title: (done && b.assessment_status === 'approved') ? '' : 'Not available yet. See "Next step" above the buttons.', onclick: function () { confirmRelease(b, msg); } })));
+        h('button', { class: 'btn' + ((done && b.assessment_status === 'approved' && !dr.seeded && !mailAlreadySent(dr)) ? ' next' : ' locked'), type: 'button', id: 'release-btn', text: 'Release result', disabled: !(done && b.assessment_status === 'approved') || !!dr.seeded || mailAlreadySent(dr), title: (done && b.assessment_status === 'approved') ? '' : 'Not available yet. See "Next step" above the buttons.', onclick: function () { confirmRelease(b, msg); } })));
       box.appendChild(flagsCard(b, dr, adv, msg));
     } else box.appendChild(h('p', { class: 'note', text: 'Read-only access (' + state.user.role + ').' }));
     var trk = trackingCard(b); if (trk && !isHistory(b)) box.appendChild(trk);
