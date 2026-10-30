@@ -629,6 +629,25 @@
       var dlg = h('dialog', { class: 'ask-dialog' }, body); dlg.addEventListener('close', function () { finish(null); }); document.body.appendChild(dlg); dlg.showModal();
     });
   }
+  // Amend a submitted score (addendum 0.3.21): every criterion again (whole numbers), a note, an optional reason from the list; the company keeps the old version.
+  function amendDialog(b, action, form) {
+    return new Promise(function (resolve) {
+      var done = false; var msg = h('p', { class: 'err', role: 'alert' }); var vals = {};
+      var total = h('strong', { text: '0 / ' + form.total_max }); var sum = function () { var t = 0; form.criteria.forEach(function (c) { if (typeof vals[c.id] === 'number') t += vals[c.id]; }); total.textContent = t + ' / ' + form.total_max + (form.pass_mark ? ' (pass mark ' + form.pass_mark + ')' : ''); };
+      var finish = function (v) { if (done) return; done = true; dlg.close(); dlg.remove(); resolve(v); };
+      var note = h('textarea', { rows: '3', maxlength: '2000', 'aria-label': 'Note' });
+      var reason = h('select', { 'aria-label': 'Reason' }, [''].concat(['Scoring Error', 'Wrong Category Selected', 'Missing Information', 'Technical Error', 'Other']).map(function (r) { return h('option', { value: r, text: r || '(no reason from the list)' }); }));
+      var body = [h('h3', { text: action.label }), h('p', { text: action.confirm || 'The company keeps the old score and cancels an older queued result. Release the corrected result through the normal steps afterwards.' }), h('p', { class: 'note', text: 'Type every score again. Nothing is sent by this form.' })];
+      form.criteria.forEach(function (c) { body.push(h('div', { class: 'field' }, h('label', { for: 'am-' + c.id, text: c.label + ' (0 to ' + c.max + ')' }), h('input', { type: 'number', id: 'am-' + c.id, min: '0', max: String(c.max), step: '1', oninput: function (e) { vals[c.id] = e.target.value === '' ? undefined : Number(e.target.value); sum(); } }))); });
+      body.push(h('p', null, 'Total: ', total), h('div', { class: 'field' }, h('label', { text: 'Note (at least 10 characters)' }), note), h('div', { class: 'field' }, h('label', { text: 'Reason' }), reason), msg,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', id: 'amend-confirm', text: 'Save the amended score', onclick: function () {
+          var g = {}; for (var i = 0; i < form.criteria.length; i++) { var c = form.criteria[i]; var v = vals[c.id]; if (typeof v !== 'number' || !isFinite(v) || Math.floor(v) !== v || v < 0 || v > c.max) { msg.textContent = 'Enter a whole number from 0 to ' + c.max + ' for ' + c.label + '.'; return; } g[c.id] = v; }
+          if (!note.value || note.value.trim().length < 10) { msg.textContent = 'Write a note of at least 10 characters.'; return; }
+          var p = { grades: g, note: note.value.trim() }; if (reason.value) p.reason = reason.value; if (form.form_version) p.form_version = form.form_version; finish(p);
+        } }), h('button', { class: 'btn secondary', type: 'button', text: 'Cancel', onclick: function () { finish(null); } })));
+      var dlg = h('dialog', { class: 'ask-dialog', id: 'amend-dialog' }, body); dlg.addEventListener('close', function () { finish(null); }); document.body.appendChild(dlg); dlg.showModal();
+    });
+  }
   function workflowModel(b, dr) {
     var d = b.details || {}; var x = dr.extra || {}; var ws = dr.workspace || {}; var mail = ws.result_email || {};
     var labels = [['Job position', d.job_position || x.job_position], ['Program applied', d.program_applied], ['Country applied', d.country_applied], ['Salary', d.salary], ['Nationality', d.nationality]];
@@ -806,7 +825,7 @@
       h('div', { class: 'actions' }, sending.concat(other).map(function (a) {
         return h('button', { class: 'btn secondary', type: 'button', 'data-ws': a.id, text: a.label, disabled: a.id === 'reschedule' && !!pendingActionFor(b), onclick: function () {
           if (a.id === 'reschedule' && pendingActionFor(b)) return;
-          askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label, bookingId: b.id }).then(function (params) {
+          (a.id === 'score_amend' && dr.workspace && dr.workspace.score_amend_grading ? amendDialog(b, a, dr.workspace.score_amend_grading) : askDialog({ title: a.label, text: a.confirm || '', kind: a.kind, choices: a.choices, reasonLabel: a.reason_label, bookingId: b.id })).then(function (params) {
             if (!params) return; msg.className = 'err'; msg.textContent = '';
             return api('POST', '/ui/api/booking/' + b.id + '/action', { action: a.id, params: params }).then(function (reply) { if (recordCompanyAction(b, a.id, reply)) softRender(); return refreshAll(); }).then(function () { openDrawer(b.id); }).catch(function (x) { msg.className = 'err'; msg.textContent = friendlyError(x, b); });
           });
