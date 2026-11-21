@@ -379,10 +379,21 @@
     var minutes = Math.floor((current - started) / 60000);
     return 'Waiting ' + Math.floor(minutes / 60) + 'h ' + pad(minutes % 60) + 'm since release';
   }
+  // Countdown to the client e-mail from the time the COMPANY says it will send (scheduled_for). Returns null when the company has not told the core.
+  function resultSendCountdownText(scheduledFor, now) {
+    var at = Date.parse(scheduledFor); var current = now === undefined ? Date.now() : now;
+    if (!scheduledFor || !Number.isFinite(at)) return null;
+    var minutes = Math.ceil((at - current) / 60000);
+    if (minutes <= 0) return 'Send time reached ' + Math.floor((current - at) / 60000) + ' min ago; waiting for the company report';
+    return 'Sending in ' + Math.floor(minutes / 60) + 'h ' + pad(minutes % 60) + 'm';
+  }
   function updateResultWaitTimers() {
     var now = Date.now();
     document.querySelectorAll('[data-result-wait-since]').forEach(function (el) {
       el.textContent = resultWaitText(el.getAttribute('data-result-wait-since'), now);
+    });
+    document.querySelectorAll('[data-result-send-at]').forEach(function (el) {
+      var t = resultSendCountdownText(el.getAttribute('data-result-send-at'), now); if (t) el.textContent = t;
     });
   }
   // Reporting periods in Dubai time. Weeks run Monday to Sunday; months are calendar months. Returns [first day, day after the last day].
@@ -582,10 +593,13 @@
         h('td', { text: ev.opened || ev.accepted || ev.rejected ? 'Yes' + (ev.opened ? ' - ' + when('opened') : '') : 'No' }),
         h('td', { text: ev.accepted ? 'Accepted ' + when('accepted') : ev.rejected ? 'Rejected ' + when('rejected') : '-' }),
         h('td', null, h('span', { class: 'chip ' + st[1], text: st[0] }),
+          i.state === 'waiting_for_company' && resultSendCountdownText(i.scheduled_for) ? h('div', null,
+            h('small', { class: 'result-wait-timer', 'data-result-send-at': i.scheduled_for, title: 'Countdown to the time the company says it will send the e-mail. It is not proof of delivery.', text: resultSendCountdownText(i.scheduled_for) }),
+            h('small', { class: 'note', text: 'Client receives around ' + localDate(i.scheduled_for) + ', ' + localTime(i.scheduled_for) + ' Dubai time' })) :
           i.state === 'waiting_for_company' ? h('small', { class: 'result-wait-timer', 'data-result-wait-since': i.released_at || '', title: 'Elapsed since release, not an email delivery countdown. Released: ' + (i.released_at ? localDate(i.released_at) + ' ' + localTime(i.released_at) + ' Dubai time' : 'unknown'), text: resultWaitText(i.released_at) }) : null));
     });
     var sent = h('div', { class: 'card scroll-x' }, h('h2', { text: 'Sent items (' + r.items.length + ')' }),
-      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent; it is only counted for a company whose system reports client answers' + ((r.answers_tracked_by || []).length ? ' (now: ' + r.answers_tracked_by.join(', ') + ')' : ' (none yet)') + '. "Waiting for company report" means the result was released but the company system has not reported on it yet. The waiting timer counts hours and minutes since release and updates every minute; it is not an email delivery countdown.' }),
+      h('p', { class: 'note', text: 'Times are Dubai time. "Ignored" means the client has not answered ' + r.ignore_after_days + ' days after the result was sent; it is only counted for a company whose system reports client answers' + ((r.answers_tracked_by || []).length ? ' (now: ' + r.answers_tracked_by.join(', ') + ')' : ' (none yet)') + '. "Waiting for company report" means the result was released but the company system has not reported on it yet. When the company has told the core when it will send the e-mail, you see "Sending in ..." and about when the client receives it. Otherwise the timer counts hours and minutes since release. Both update every minute; neither proves delivery.' }),
       r.items.length ? h('table', null, h('thead', null, h('tr', null, ['Sent', 'Company', 'Client', 'Interview', 'E-mail', 'Opened', 'Client answer', 'Status'].map(function (x) { return h('th', { text: x }); }))), h('tbody', null, rows))
         : h('p', { class: 'note', text: 'No results were sent in this period.' }));
     return h('div', null, bar, resFreshLine(), state.error ? h('p', { class: 'err', text: state.error }) : null, tiles, itemsCard, h('div', { class: 'grid2' }, funnel, per), advisors, sent);
@@ -1213,6 +1227,12 @@
         var x = state.drawer.extra = state.drawer.extra || {}; var st = row.cells && row.cells.state; if (st && x.confirmation !== st) { x.confirmation = st; softRender(); }
       }).catch(function (e) { failed('confirmations', e); }).then(settle);
   }
+  function detailLookupNotice(booking) {
+    if (!booking || !booking.details_unavailable) return null;
+    var id = typeof booking.details_error_id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(booking.details_error_id)
+      ? booking.details_error_id : null;
+    return 'Company details could not be loaded. Scheduling data below comes from the core.' + (id ? ' Support reference: ' + id + '.' : '');
+  }
   function drawerEl() {
     var dr = state.drawer; if (!dr) return null;
     var close = h('button', { class: 'btn secondary', type: 'button', text: 'Close', id: 'drawer-close', onclick: function () { state.drawer = null; renderMain(); } });
@@ -1225,7 +1245,7 @@
     if (dr.dups && dr.dups.length) box.appendChild(h('div', { class: 'dupwarn', role: 'alert' }, h('strong', { text: 'Possible duplicate: this client has another interview with ' + b.company + '.' }),
       h('ul', null, dr.dups.map(function (x) { return h('li', { text: dupText(x) }); })), h('p', { text: 'Use ONE interview for the result. Do not release or send a second result for the same client. Tell the owner if both should stay.' })));
     var pendingCard = pendingActionCard(b); if (pendingCard) box.appendChild(pendingCard);
-    if (b.details_unavailable) box.appendChild(h('p', { class: 'note', text: 'The company system did not answer. Scheduling data below comes from the core.' }));
+    var detailNotice = detailLookupNotice(b); if (detailNotice) box.appendChild(h('p', { class: 'note', text: detailNotice }));
     var rows = [['Interview', localDate(b.start) + ' ' + localTime(b.start) + '-' + localTime(b.end) + ' (Dubai)'], ['Interview status', statusLabel(b.status)], ['Job position', d.job_position || xx.job_position || dash], ['Program applied', d.program_applied || dash, !d.program_applied && !(dr.pending > 0)], ['Country applied', d.country_applied || dash], ['Salary', d.salary || dash], ['Nationality', d.nationality || dash],
       [b.company === 'RGAB' ? 'Counselor' : 'Advisor', d.advisor_name || xx.advisor_name || dash],
       ['Client e-mail', d.client_email || xx.client_email || dash],
