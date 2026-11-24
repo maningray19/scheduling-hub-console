@@ -571,7 +571,7 @@ nav.tabs button[aria-selected=true] { background: linear-gradient(110deg, #17274
 .wc-card.night { background: #0f1b2d; color: #e2e8f0; } .wc-card.night .note { color: #cbd5e1; }
 .wc-star { padding: 2px 10px; font-size: 18px; line-height: 1.2; }
 .wc-region h3 { margin: 18px 0 8px; }
-@media (max-width: 760px) { .worldclock { order: 5; width: 100%; margin-right: 0; } }
+@media (max-width: 760px) { .worldclock { order: 5; width: 100%; min-width: 0; flex-wrap: wrap; margin-right: 0; } }
 @media (max-width: 1560px) { .worldclock .wc:nth-child(n+7) { display: none; } }
 @media (max-width: 1250px) { .worldclock .wc:nth-child(n+5) { display: none; } }
 
