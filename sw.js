@@ -1,5 +1,5 @@
 'use strict';
-/* CORE-PWA-SW (27 Nov 2026): service worker of the Core / Command Center app, version core-pwa-20261127-1
+/* CORE-PWA-SW (27 Nov 2026): service worker of the Core / Command Center app, version core-pwa-20261127-2
    Purpose: lets the Core app be installed as an app, and shows a plain "no connection" page when the network is down.
    What it does NOT do (on purpose):
    - It never stores a page, a script, a style sheet, an API answer or anything the person is signed in to. Only offline.html and the app icons are stored.
@@ -8,7 +8,7 @@
    - It does not touch /build.json or the version watch: those requests are not intercepted at all.
    Kill switch: /sw-off.json. If it says {"off":true} this worker deletes its stores and unregisters itself (checked at start and at most every 30 minutes while a page is opened).
    Rollback: publish sw-tombstone.js as sw.js (an empty worker that clears the caches and unregisters itself), or set sw-off.json to {"off":true}. */
-var CORE_SW_VERSION = 'core-pwa-20261127-1'; /* change this text whenever sw.js changes, e.g. core-pwa-20261128-1 */
+var CORE_SW_VERSION = 'core-pwa-20261127-2'; /* change this text whenever sw.js changes, e.g. core-pwa-20261128-1 */
 var CORE_SW_CACHE = CORE_SW_VERSION;
 var CORE_SW_SHELL = ['/offline.html', '/assets/core-icon-192.png', '/assets/core-icon-maskable-192.png'];
 var CORE_SW_BYPASS = new RegExp('^/(preview-frame|booking-backup)');
@@ -60,7 +60,7 @@ self.addEventListener('fetch', function (event) {
   if (Date.now() - CORE_SW_LAST_CHECK > CORE_SW_CHECK_GAP) {
     event.waitUntil(coreSwSwitchIsOff().then(function (off) { if (off) { return coreSwKill(); } return null; }));
   }
-  event.respondWith(self.fetch(req).catch(function () {
+  event.respondWith(self.fetch(req, { cache: 'no-cache' }).catch(function () {
     return self.caches.match('/offline.html').then(function (r) {
       return r || new Response('No connection. Please check your internet and try again.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     });

@@ -26,7 +26,7 @@
     /* kill switch: when /sw-off.json says off, nothing is registered and no button is shown */
     win.fetch('/sw-off.json?cb=' + new Date().getTime(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }).then(function (j) {
       if (j && j.off === true) { off = true; hideBtn(); return null; }
-      return win.navigator.serviceWorker.register('/sw.js?v=core-pwa-20261127-1', { scope: '/', updateViaCache: 'none' });
+      return win.navigator.serviceWorker.register('/sw.js?v=core-pwa-20261127-2', { scope: '/', updateViaCache: 'none' });
     }).catch(function () { /* the portal works without it */ });
   }
   function ensureManifest() {
@@ -80,7 +80,7 @@
 
   win.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; if (doc.body) { showBtn(); } else { doc.addEventListener('DOMContentLoaded', showBtn); } });
   win.addEventListener('appinstalled', function () { deferred = null; hideBtn(); closeCard(); });
-  ensureManifest();
+  ensureManifest(); css();
   if (doc.readyState === 'complete') { register(); } else { win.addEventListener('load', register); }
   if (iosSafari()) { if (doc.readyState === 'loading') { doc.addEventListener('DOMContentLoaded', showBtn); } else { showBtn(); } }
   win.CorePwa = { open: openCard, install: install, isInstalled: standalone };
