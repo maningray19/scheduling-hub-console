@@ -1677,7 +1677,7 @@
     if (live.controller) live.controller.abort(); live.controller = null;
   }
   function endSession() {
-    stopLive(); liveSession++; setToken(null); pendingActionState = Object.create(null); pendingActionVersions = Object.create(null); state.user = null; state.drawer = null; state.items = []; state.tabData = {}; state.wide = null; state.controls = null; state.notices = null; state.loaded = null; state.error = null;
+    stopLive(); if (conflictsTimer) { clearTimeout(conflictsTimer); conflictsTimer = null; } state.conflictsUnread = 0; liveSession++; setToken(null); pendingActionState = Object.create(null); pendingActionVersions = Object.create(null); state.user = null; state.drawer = null; state.items = []; state.tabData = {}; state.wide = null; state.controls = null; state.notices = null; state.loaded = null; state.error = null;
     calEpoch++; calCache = []; resCache = {}; calPending = {};
     live.revision = ''; live.fingerprint = ''; live.items = []; live.unread = 0; live.dirty = false; live.drawerPending = false;
     var dialog = document.getElementById('notifications-dialog'); if (dialog) { dialog.close(); dialog.remove(); }
@@ -1711,6 +1711,13 @@
     if (!live.revision && live.status !== 'Live updates connected') return live.failures ? 'Unable to load interview updates. Check your connection and press Retry updates.' : 'Loading interview updates…';
     return showAll ? 'No interview updates are available.' : 'You have no unchecked updates in this list.';
   }
+  // D-51: unread refusals on the Client conflicts tab (facilitator and owner roles only); checked every 60 s and when the tab is opened
+  var conflictsTimer = null;
+  function pollConflicts() {
+    if (!state.user || !(state.user.role === 'facilitator' || state.user.role === 'approver')) return;
+    api('GET', '/ui/api/presence-conflicts/unread').then(function (x) { var n = x && Number.isInteger(x.unread) ? x.unread : 0; if (state.tab === 'conflicts') n = 0; if (n !== state.conflictsUnread) { state.conflictsUnread = n; if (typeof render === 'function') render(); } }).catch(function () {});
+  }
+  function startConflictsPoll() { if (conflictsTimer) return; (function again() { pollConflicts(); conflictsTimer = setTimeout(again, 60000); })(); }
   function startLive(reset) {
     stopLive();
     if (reset) { live.revision = ''; live.fingerprint = ''; live.items = []; live.unread = 0; live.failures = 0; live.dirty = false; live.drawerPending = false; live.refreshing = false; live.unsupported = false; }
@@ -1858,7 +1865,7 @@
       h('header', { class: 'topbar' }, h('h1', { text: 'Facilitator Command Center' }), worldClock(), h('span', { class: 'badge', text: u.display_name + ' - ' + u.role }),
         h('button', { class: 'btn secondary' + (tourSeen() ? '' : ' hint'), type: 'button', id: 'tour-btn', text: 'Tour', title: 'A two-minute guided tour', onclick: function () { if (window.PICTour) window.PICTour.start(); } }),
         h('button', { class: 'btn secondary', type: 'button', id: 'logout', text: 'Sign out', onclick: function () { stopLive(); api('POST', '/ui/api/logout', {}).finally(function () { endSession(); render(); }); } })),
-      h('nav', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) { return h('button', { role: 'tab', type: 'button', 'aria-selected': String(state.tab === t[0]), 'data-tab': t[0], text: t[1], onclick: function () { state.tab = t[0]; state.fx = true; refresh(); } }); })),
+      h('nav', { class: 'tabs', role: 'tablist' }, tabs.map(function (t) { return h('button', { role: 'tab', type: 'button', 'aria-selected': String(state.tab === t[0]), 'data-tab': t[0], text: (t[0] === 'conflicts' && state.conflictsUnread > 0) ? t[1] + ' (' + state.conflictsUnread + ')' : t[1], onclick: function () { state.tab = t[0]; state.fx = true; refresh(); } }); })),
       h('main', { id: 'main' }),
       limited() ? null : h('button', { class: 'btn floating-updates' + (live.unread ? ' has-unread' : ''), type: 'button', id: 'notifications-btn', text: 'Updates' + (live.unread ? ' (' + live.unread + ')' : ''), 'aria-haspopup': 'dialog', 'aria-label': 'Interview updates' + (live.unread ? ', ' + live.unread + ' unread' : ''), onclick: notificationsDialog }));
   }
@@ -1893,7 +1900,7 @@
       jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (state.tab === t && generation === refreshGeneration && rq === resKey()) { state.tabData.results = x; state.error = ''; } }).catch(function (e) { if (state.tab === t && generation === refreshGeneration && rq === resKey()) state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
-    if (t === 'conflicts') jobs.push(api('GET', '/ui/api/presence-conflicts').then(function (x) { state.tabData.conflicts = x; }).catch(function () { state.tabData.conflicts = []; state.error = 'The client conflicts list could not be loaded.'; }));
+    if (t === 'conflicts') jobs.push(api('GET', '/ui/api/presence-conflicts').then(function (x) { state.tabData.conflicts = x; state.conflictsUnread = 0; api('POST', '/ui/api/presence-conflicts/seen', {}).catch(function () {}); }).catch(function () { state.tabData.conflicts = []; state.error = 'The client conflicts list could not be loaded.'; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
     if (t === 'management') {
       jobs.push(api('GET', '/ui/api/incidents').then(function (i) { state.tabData.incidents = i; }).catch(function () {}));
@@ -1918,7 +1925,7 @@
   }
   function init() {
     stopLive(); var session = ++liveSession;
-    return takeLaunch().then(function () { return api('GET', '/ui/api/me'); }).then(function (m) { if (session !== liveSession) return; state.user = m.user; return loadControls(); }).then(function () { if (session !== liveSession || !state.user) return; render(); startLive(true); return refreshTab(); }).catch(function (e) { if (session !== liveSession) return; if (e && e.status !== 401) console.error('init failed', e && e.stack || e); endSession(); render(); });
+    return takeLaunch().then(function () { return api('GET', '/ui/api/me'); }).then(function (m) { if (session !== liveSession) return; state.user = m.user; return loadControls(); }).then(function () { if (session !== liveSession || !state.user) return; render(); startLive(true); startConflictsPoll(); return refreshTab(); }).catch(function (e) { if (session !== liveSession) return; if (e && e.status !== 401) console.error('init failed', e && e.stack || e); endSession(); render(); });
   }
   document.addEventListener('keydown', function (e) {
     if (!state.user || e.ctrlKey || e.metaKey || e.altKey || document.body.classList.contains('touring') || /INPUT|SELECT|TEXTAREA/.test((document.activeElement || {}).tagName || '') || document.querySelector('dialog[open]')) return;
