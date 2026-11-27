@@ -1142,6 +1142,18 @@
     return h('div', null, controls, reportCard, testCard, h('div', { class: 'grid2' }, incidents, report), noticesCard(), audit);
   }
 
+  // Refused bookings: a client who already has an interview in the other company (or twice in one company). Only the facilitator and the owner roles see this; the companies never receive these details (D-51).
+  function conflictsTab() {
+    var rows = Array.isArray(state.tabData.conflicts) ? state.tabData.conflicts : [];
+    var scopeText = { other_company: 'Already in the other company', active_booking: 'Active booking in the other company', same_company: 'Already booked in the same company' };
+    return h('div', { class: 'card' }, h('h2', { text: 'Client conflicts' }),
+      h('p', { class: 'note', text: 'Each row is a booking the core refused because the same client already has an interview. The employee only saw "This booking cannot be made. Please contact the Super Admin." Details here are for the facilitator and the owner only; decide with the companies outside this screen.' }),
+      rows.length ? h('table', null, h('thead', null, h('tr', null, ['When', 'Refused in', 'What was tried', 'Why', 'Held by', 'Interview date', 'Status', 'Adviser', 'Interviewer'].map(function (x) { return h('th', { text: x }); }))),
+        h('tbody', null, rows.map(function (r) {
+          return h('tr', null, h('td', { text: new Date(Date.parse(r.at) + 4 * 3600000).toISOString().slice(0, 16).replace('T', ' ') + ' Dubai' }), h('td', null, companyBadge(r.refusing_company)), h('td', { text: r.op || '' }), h('td', { text: scopeText[r.scope] || r.scope || '' }),
+            h('td', null, r.holder_company ? companyBadge(r.holder_company) : null), h('td', { text: r.holder_date || '' }), h('td', { text: r.holder_status || '' }), h('td', { text: r.holder_adviser || '' }), h('td', { text: r.holder_interviewer || '' }));
+        }))) : h('p', { class: 'note', text: 'No refusals recorded.' }));
+  }
   function linksTab() {
     var l = state.tabData.links || { identities: [], requests: [] }; var msg = h('p', { class: 'err', id: 'linkmsg' });
     var comp = h('select', { id: 'lk-company', 'aria-label': 'Company' }, ['RGOS', 'RGAB'].map(function (c) { return h('option', { value: c, text: c }); }));
@@ -1656,7 +1668,7 @@
     if (window.PIC_ENV !== 'live') fetch((window.PIC_API_BASE || '') + '/ui/api/login-mode', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { if (m && m.demo === true && method === 'local') { totp.required = false; totp.parentNode.hidden = true; totp.parentNode.style.display = 'none'; form.insertBefore(h('p', { class: 'note', id: 'demo-note', text: 'DEMO environment: sign in with the demo login name and password only. No code is asked for here.' }), form.querySelector('.field')); } }).catch(function () {});   // the real service never says demo
     return form;
   }
-  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['availability', 'Leave and availability'], ['notices', 'Notices'], ['worldclock', 'World clock'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
+  var TABS = [['calendar', 'Calendar'], ['queues', 'Queues'], ['confirmations', 'Confirmations'], ['offers', 'Offers'], ['results', 'Results sent'], ['conflicts', 'Client conflicts'], ['availability', 'Leave and availability'], ['notices', 'Notices'], ['worldclock', 'World clock'], ['links', 'Linked identities'], ['management', 'Management'], ['tutorials', 'Tutorials']];
   function tourSeen() { try { return window.localStorage.getItem('pic_tour_done') === '1'; } catch (e) { return true; } }
   // One visible-tab long poll. A revision invalidates data, but never replaces an open form or card.
   var live = { run: 0, timer: null, controller: null, revision: '', fingerprint: '', items: [], unread: 0, failures: 0, dirty: false, drawerPending: false, status: 'Connecting', unsupported: false };
@@ -1839,7 +1851,7 @@
   document.addEventListener('click', function () { if (live.dirty) setTimeout(flushLiveRefresh, 0); });
   function mainShell() {
     var u = state.user; var frozen = state.controls && (state.controls.bookings_enabled === false || state.controls.releases_enabled === false);
-    var tabs = limited() ? TABS.filter(function (t) { return t[0] === 'calendar'; }) : TABS.filter(function (t) { if (['confirmations', 'offers'].indexOf(t[0]) >= 0) return u.role === 'facilitator' || u.role === 'approver'; return t[0] !== 'management' || u.role === 'approver' || u.role === 'viewer'; });
+    var tabs = limited() ? TABS.filter(function (t) { return t[0] === 'calendar'; }) : TABS.filter(function (t) { if (['confirmations', 'offers', 'conflicts'].indexOf(t[0]) >= 0) return u.role === 'facilitator' || u.role === 'approver'; return t[0] !== 'management' || u.role === 'approver' || u.role === 'viewer'; });
     return h('div', null,
       frozen ? h('div', { class: 'banner', role: 'alert', text: 'EMERGENCY FREEZE ACTIVE: new bookings' + (state.controls.releases_enabled === false ? ' and result releases are' : ' are') + ' disabled. Existing appointments are unaffected.' }) : null,
       window.PIC_ENV === 'live' ? null : h('div', { class: 'synth', text: 'DEVELOPMENT BUILD - synthetic data only. Assessment templates shown are clearly marked placeholders, not approved templates.' }),
@@ -1854,7 +1866,7 @@
     var m = document.getElementById('main'); if (!m) return;
     if (state.tab === 'tutorials' && !state.forceRender) { var pv = m.querySelector('video'); if (pv && !pv.paused && !pv.ended) { updateNoticesUi(); return; } }
     m.textContent = '';
-    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'notices' ? noticesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'worldclock' ? worldClockTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
+    var body = state.tab === 'calendar' ? calendarTab() : state.tab === 'queues' ? queuesTab() : (state.tab === 'confirmations' || state.tab === 'offers') ? listsTab(state.tab) : state.tab === 'notices' ? noticesTab() : state.tab === 'results' ? resultsTab() : state.tab === 'conflicts' ? conflictsTab() : state.tab === 'worldclock' ? worldClockTab() : state.tab === 'availability' ? availabilityTab() : state.tab === 'links' ? linksTab() : state.tab === 'tutorials' ? tutorialsTab() : managementTab();
     if (state.fx) { body.classList.add('enter'); state.fx = false; }
     var nb = noticesBar(); if (nb) m.appendChild(nb);
     if (state.error) m.appendChild(h('div', { class: 'notice', role: 'alert' }, ['calendar', 'queues', 'results'].indexOf(state.tab) < 0 ? h('p', { text: state.error }) : null, h('button', { class: 'btn secondary', type: 'button', text: 'Retry loading', onclick: function () { refreshTab(); } })));
@@ -1881,6 +1893,7 @@
       jobs.push(api('GET', rq).then(function (x) { resCache[rq] = x; if (state.tab === t && generation === refreshGeneration && rq === resKey()) { state.tabData.results = x; state.error = ''; } }).catch(function (e) { if (state.tab === t && generation === refreshGeneration && rq === resKey()) state.error = e.message || 'Could not load.'; })); }
     if (t === 'availability') { jobs.push(api('GET', '/ui/api/schedule').then(function (x) { state.tabData.schedule = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/extra-availability?from=' + rng).then(function (x) { state.tabData.extra = x; }).catch(function () {})); jobs.push(api('GET', '/ui/api/availability?from=' + rng).then(function (a) { state.tabData.avail = a; })); jobs.push(api('GET', '/ui/api/profiles').then(function (p) { state.tabData.profiles = p; })); }
     if (t === 'tutorials') jobs.push(fetch('videos/manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) { state.tabData.videos = m; }).catch(function () { state.tabData.videos = null; }));
+    if (t === 'conflicts') jobs.push(api('GET', '/ui/api/presence-conflicts').then(function (x) { state.tabData.conflicts = x; }).catch(function () { state.tabData.conflicts = []; state.error = 'The client conflicts list could not be loaded.'; }));
     if (t === 'links') jobs.push(api('GET', '/ui/api/links').then(function (l) { state.tabData.links = l; }));
     if (t === 'management') {
       jobs.push(api('GET', '/ui/api/incidents').then(function (i) { state.tabData.incidents = i; }).catch(function () {}));
