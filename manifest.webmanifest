@@ -1,0 +1,20 @@
+{
+  "name": "Facilitator Command Center",
+  "short_name": "Core",
+  "description": "Shared interview scheduling and bookings",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#15233d",
+  "theme_color": "#15233d",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/assets/core-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/core-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/core-icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/core-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
